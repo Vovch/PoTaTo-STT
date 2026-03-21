@@ -1,0 +1,8 @@
+PySide6
+requests
+sounddevice
+numpy
+pynput
+py7zr
+onnx-asr[hub]
+onnxruntime-directml
