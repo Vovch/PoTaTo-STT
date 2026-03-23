@@ -9,10 +9,11 @@ from typing import Optional
 
 import numpy as np
 import sounddevice as sd
-from PySide6.QtCore import QEvent, QObject, Qt, Signal, Slot, QTimer
+from PySide6.QtCore import QEvent, QObject, Qt, QSettings, Signal, Slot, QTimer
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -32,6 +33,7 @@ from pipit_clone.config import Settings
 from pipit_clone.onnx_asr_engine import OnnxAsrEngine
 from pipit_clone.parakeet_windows_installer import ensure_parakeet_service
 from pipit_clone.stt_client import transcribe_wav
+from pipit_clone.transcript_utils import finalize_sentence_for_clipboard, normalize_phrase_spacing
 from pipit_clone.win32_paste import (
     get_foreground_hwnd,
     is_window,
@@ -116,6 +118,12 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(self._app_icon)
 
         self.settings = Settings()
+        self._settings_store = QSettings("PipitClone", "PipitClone")
+        _default_lang = self.settings.stt_prompt
+        _saved_lang = self._settings_store.value("speech_language_code", _default_lang, type=str)
+        _valid_langs = frozenset({"en", "ja", "vi"})
+        self._speech_language_code: str = _saved_lang if _saved_lang in _valid_langs else _default_lang
+
         self._status_label = QLabel("Initializing...")
         self._transcript = QTextEdit()
         self._transcript.setReadOnly(True)
@@ -123,6 +131,30 @@ class MainWindow(QMainWindow):
 
         self._help_label = QLabel("Hold Right Ctrl to record. Release to transcribe.")
         self._help_label.setWordWrap(True)
+
+        self._speech_language_combo = QComboBox()
+        for _code, _label in (
+            ("en", "English"),
+            ("ja", "Japanese (日本語)"),
+            ("vi", "Vietnamese"),
+        ):
+            self._speech_language_combo.addItem(_label, _code)
+        _lang_idx = self._speech_language_combo.findData(self._speech_language_code)
+        if _lang_idx < 0:
+            _lang_idx = self._speech_language_combo.findData("en")
+        self._speech_language_combo.setCurrentIndex(max(0, _lang_idx))
+        self._speech_language_code = str(self._speech_language_combo.currentData())
+        self._speech_language_combo.currentIndexChanged.connect(self._on_speech_language_changed)
+
+        _lang_row = QHBoxLayout()
+        _lang_row.addWidget(QLabel("Speech language:"))
+        _lang_row.addWidget(self._speech_language_combo, 1)
+        _lang_help = QLabel(
+            "HTTP backend: sent as API `prompt`. ONNX backend: one model; this setting may not change output."
+        )
+        _lang_help.setWordWrap(True)
+        _lang_help.setStyleSheet("color: #888888; font-size: 11px;")
+
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)
         self._progress.setFormat("Starting...")
@@ -133,6 +165,8 @@ class MainWindow(QMainWindow):
         root = QWidget()
         layout = QVBoxLayout()
         layout.addWidget(self._help_label)
+        layout.addLayout(_lang_row)
+        layout.addWidget(_lang_help)
         layout.addWidget(self._status_label)
         layout.addWidget(self._progress)
         layout.addLayout(QHBoxLayout())
@@ -241,13 +275,22 @@ class MainWindow(QMainWindow):
         self._shutdown()
         super().closeEvent(event)
 
+    @Slot()
+    def _on_speech_language_changed(self) -> None:
+        code = self._speech_language_combo.currentData()
+        if not isinstance(code, str) or not code:
+            return
+        self._speech_language_code = code
+        self._settings_store.setValue("speech_language_code", code)
+
     @Slot(str)
     def _append_transcript(self, text: str) -> None:
         current = self._transcript.toPlainText().strip()
+        line = finalize_sentence_for_clipboard(text)
         if not current:
-            self._transcript.setPlainText(text.strip() + "\n")
+            self._transcript.setPlainText(line + "\n")
         else:
-            self._transcript.setPlainText(current + "\n" + text.strip() + "\n")
+            self._transcript.setPlainText(current + "\n" + line + "\n")
         self._transcript.ensureCursorVisible()
 
     def _position_recording_overlay(self) -> None:
@@ -349,7 +392,9 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _paste_transcript_to_active_app(self, text: str) -> None:
-        text = text.strip()
+        # Do not use strip() alone — it removes the trailing space after . ! ? that
+        # normalize_phrase_spacing adds for continued typing after paste.
+        text = finalize_sentence_for_clipboard(text)
         if not text:
             return
 
@@ -385,7 +430,12 @@ class MainWindow(QMainWindow):
 
         try:
             if self.settings.stt_backend.lower() == "onnx_asr":
-                providers = [p.strip() for p in self.settings.onnx_asr_providers.split(",") if p.strip()]
+                if self.settings.cpu_only:
+                    providers = ["CPUExecutionProvider"]
+                else:
+                    providers = [
+                        p.strip() for p in self.settings.onnx_asr_providers.split(",") if p.strip()
+                    ]
                 self._onnx_engine = OnnxAsrEngine(
                     model_name=self.settings.onnx_asr_model,
                     providers=providers,
@@ -531,6 +581,7 @@ class MainWindow(QMainWindow):
         self.signals.statusChanged.emit("Transcribing...")
 
         def _job(pcm_data: np.ndarray) -> None:
+            speech_lang = self._speech_language_code
             try:
                 with tempfile.TemporaryDirectory(prefix="pipit-audio-") as tmpdir:
                     wav_path = os.path.join(tmpdir, f"talk_{int(time.time()*1000)}.wav")
@@ -540,18 +591,20 @@ class MainWindow(QMainWindow):
                     if self.settings.stt_backend.lower() == "onnx_asr":
                         if self._onnx_engine is None:
                             raise RuntimeError("ONNX ASR engine is not initialized.")
-                        text = self._onnx_engine.transcribe_wav(wav_path)
+                        text = self._onnx_engine.transcribe_wav(
+                            wav_path, language=speech_lang
+                        )
                     else:
                         text = transcribe_wav(
                             wav_path,
                             api_url=self.settings.stt_api_url,
                             model=self.settings.stt_model,
-                            prompt=self.settings.stt_prompt,
+                            prompt=speech_lang,
                             response_format=self.settings.stt_response_format,
                             timeout_seconds=self.settings.stt_timeout_seconds,
                         )
                     took = time.time() - t0
-                    cleaned = text.strip()
+                    cleaned = normalize_phrase_spacing(text)
                     if cleaned:
                         self.signals.transcriptAppend.emit(cleaned)
                         self.signals.transcriptReady.emit(cleaned)

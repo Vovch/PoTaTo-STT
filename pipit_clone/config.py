@@ -38,6 +38,8 @@ class Settings:
         "PIPIT_ONNX_ASR_PROVIDERS",
         "DmlExecutionProvider,CPUExecutionProvider",
     )
+    # When 1, ONNX ASR uses CPU only (no DirectML/GPU); ignores PIPIT_ONNX_ASR_PROVIDERS.
+    cpu_only: bool = _getenv_int("PIPIT_CPU_ONLY", 0) == 1
 
     # Download/extract the official Windows all-in-one package on first run.
     parakeet_win_url: str = _getenv_str(

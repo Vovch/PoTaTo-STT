@@ -40,9 +40,15 @@ class OnnxAsrEngine:
     def warmup(self, on_status: Optional[Callable[[str], None]] = None) -> None:
         self._ensure_model(on_status=on_status)
 
-    def transcribe_wav(self, wav_path: str | Path) -> str:
+    def transcribe_wav(
+        self, wav_path: str | Path, *, language: Optional[str] = None
+    ) -> str:
         model = self._ensure_model()
-        text = model.recognize(str(wav_path))
+        kwargs: dict[str, str] = {}
+        if language:
+            # onnx-asr uses `language` for Whisper/Canary; Parakeet TDT models ignore it.
+            kwargs["language"] = language
+        text = model.recognize(str(wav_path), **kwargs)
         if isinstance(text, str):
             return text.strip()
         return str(text).strip()

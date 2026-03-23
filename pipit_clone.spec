@@ -60,6 +60,9 @@ try:
 except Exception:
     pass
 
+# Launcher that sets PIPIT_CPU_ONLY=1 (bundled next to PipitClone.exe).
+datas += [(os.path.join(spec_root, "PipitCloneCPU.bat"), ".")]
+
 a = Analysis(
     [os.path.join(spec_root, "pipit_clone", "__main__.py")],
     pathex=[spec_root],

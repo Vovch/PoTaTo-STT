@@ -24,4 +24,5 @@ Write-Host "Running PyInstaller ..." -ForegroundColor Cyan
 
 Write-Host ""
 Write-Host "Done. Run: $($Root)\dist\PipitClone\PipitClone.exe" -ForegroundColor Green
+Write-Host "CPU-only: $($Root)\dist\PipitClone\PipitCloneCPU.bat (sets PIPIT_CPU_ONLY=1)" -ForegroundColor Green
 Write-Host "Ship the entire dist\PipitClone folder (DLLs live next to the .exe)." -ForegroundColor Yellow
