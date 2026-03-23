@@ -4,6 +4,7 @@ Windows helpers: restore foreground window and inject Ctrl+V reliably for global
 from __future__ import annotations
 
 import ctypes
+import sys
 import time
 
 user32 = ctypes.windll.user32
@@ -50,3 +51,15 @@ def send_ctrl_v_keybd_event() -> None:
     user32.keybd_event(VK_V, 0, 0, 0)
     user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
     user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+
+
+def set_windows_app_user_model_id(
+    app_id: str = "PipitClone.PipitClone.Application.1",
+) -> None:
+    """Assign a stable AppUserModelID so the taskbar shows QWidget window icons (not python.exe)."""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception:
+        pass

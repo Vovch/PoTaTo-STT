@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -8,18 +9,21 @@ from typing import Optional
 
 import numpy as np
 import sounddevice as sd
-from PySide6.QtCore import QObject, Qt, Signal, Slot, QTimer
+from PySide6.QtCore import QEvent, QObject, Qt, Signal, Slot, QTimer
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QSystemTrayIcon,
     QTextEdit,
     QVBoxLayout,
     QWidget,
-    QHBoxLayout,
 )
 from pynput import keyboard
 
@@ -28,7 +32,40 @@ from pipit_clone.config import Settings
 from pipit_clone.onnx_asr_engine import OnnxAsrEngine
 from pipit_clone.parakeet_windows_installer import ensure_parakeet_service
 from pipit_clone.stt_client import transcribe_wav
-from pipit_clone.win32_paste import get_foreground_hwnd, is_window, send_ctrl_v_keybd_event, set_foreground_hwnd
+from pipit_clone.win32_paste import (
+    get_foreground_hwnd,
+    is_window,
+    send_ctrl_v_keybd_event,
+    set_foreground_hwnd,
+    set_windows_app_user_model_id,
+)
+
+
+def build_app_icon() -> QIcon:
+    """Raster icon for window + tray (no bundled image assets)."""
+    icon = QIcon()
+
+    def _render(size: int) -> QPixmap:
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        margin = max(1, size // 16)
+        p.setBrush(QColor("#2563eb"))
+        p.setPen(QColor("#1e40af"))
+        p.drawRoundedRect(margin, margin, size - 2 * margin, size - 2 * margin, size // 6, size // 6)
+        p.setPen(QColor("#ffffff"))
+        font = p.font()
+        font.setPixelSize(max(8, int(size * 0.45)))
+        font.setBold(True)
+        p.setFont(font)
+        p.drawText(pm.rect(), int(Qt.AlignCenter), "P")
+        p.end()
+        return pm
+
+    for s in (16, 24, 32, 48, 64, 128, 256):
+        icon.addPixmap(_render(s))
+    return icon
 
 
 class AppSignals(QObject):
@@ -70,10 +107,13 @@ class RecordingOverlay(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, app_icon: Optional[QIcon] = None) -> None:
         super().__init__()
         self.setWindowTitle("Pipit Clone (Parakeet TDT STT) - Right Ctrl Push-to-Talk")
         self.setMinimumWidth(820)
+
+        self._app_icon = app_icon if app_icon is not None else build_app_icon()
+        self.setWindowIcon(self._app_icon)
 
         self.settings = Settings()
         self._status_label = QLabel("Initializing...")
@@ -127,10 +167,66 @@ class MainWindow(QMainWindow):
         # Hotkey listener.
         self._hotkey_listener: Optional[keyboard.Listener] = None
 
+        self._tray_icon: Optional[QSystemTrayIcon] = None
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            tray = QSystemTrayIcon(self)
+            tray.setIcon(self._app_icon)
+            tray.setToolTip("Pipit Clone — hold Right Ctrl to talk")
+            tray_menu = QMenu()
+            act_show = QAction("Show", self)
+            act_show.triggered.connect(self._show_from_tray)
+            tray_menu.addAction(act_show)
+            act_quit = QAction("Quit", self)
+            act_quit.triggered.connect(self._quit_from_tray)
+            tray_menu.addAction(act_quit)
+            tray.setContextMenu(tray_menu)
+            tray.activated.connect(self._on_tray_activated)
+            tray.show()
+            self._tray_icon = tray
+            self._help_label.setText(
+                "Hold Right Ctrl to record. Release to transcribe. "
+                "Minimize the window to send it to the system tray (double-click the tray icon to restore)."
+            )
+
         # Start engine ensure in background, then register hotkey.
         threading.Thread(target=self._ensure_engine_and_start_hotkey, daemon=True).start()
 
-    def closeEvent(self, event):  # type: ignore[no-untyped-def]
+    def changeEvent(self, event: QEvent) -> None:
+        if (
+            event.type() == QEvent.Type.WindowStateChange
+            and self._tray_icon is not None
+            and self.windowState() & Qt.WindowState.WindowMinimized
+        ):
+            QTimer.singleShot(0, self._hide_to_tray)
+        super().changeEvent(event)
+
+    def _hide_to_tray(self) -> None:
+        if self._tray_icon is None:
+            return
+        if not (self.windowState() & Qt.WindowState.WindowMinimized):
+            return
+        self.setWindowState(Qt.WindowState.WindowNoState)
+        self.hide()
+
+    @Slot()
+    def _show_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    @Slot(QSystemTrayIcon.ActivationReason)
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._show_from_tray()
+
+    @Slot()
+    def _quit_from_tray(self) -> None:
+        self._shutdown()
+        QApplication.quit()
+
+    def _shutdown(self) -> None:
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
         try:
             if self._hotkey_listener is not None:
                 self._hotkey_listener.stop()
@@ -140,6 +236,9 @@ class MainWindow(QMainWindow):
             self._stop_recording()
         except Exception:
             pass
+
+    def closeEvent(self, event):  # type: ignore[no-untyped-def]
+        self._shutdown()
         super().closeEvent(event)
 
     @Slot(str)
@@ -194,7 +293,7 @@ class MainWindow(QMainWindow):
                 pct = int(float(pct_str))
                 self._progress.setRange(0, 100)
                 self._progress.setValue(max(0, min(100, pct)))
-                self._progress.setFormat(f"Download {pct}%")
+                self._progress.setFormat(f"Downloading from internet — {pct}%")
                 return
             except Exception:
                 pass
@@ -204,10 +303,39 @@ class MainWindow(QMainWindow):
                 pct = int(float(pct_str))
                 self._progress.setRange(0, 100)
                 self._progress.setValue(max(0, min(100, pct)))
-                self._progress.setFormat(f"Model {pct}%")
+                self._progress.setFormat(f"Downloading model from internet — {pct}%")
                 return
             except Exception:
                 pass
+        # Indeterminate bar + label: network/model fetch without a numeric percent yet.
+        if (
+            "waiting for parakeet service to finish model download" in lower
+            or "downloading parakeet windows package" in lower
+            or "package url failed, downloading" in lower
+        ):
+            self._progress.setRange(0, 0)
+            self._progress.setFormat("Downloading from internet...")
+            return
+        if "preparing parakeet http stt engine" in lower:
+            self._progress.setRange(0, 0)
+            self._progress.setFormat("Preparing STT (may download from internet)...")
+            return
+        if "extracting package" in lower:
+            self._progress.setRange(0, 0)
+            self._progress.setFormat("Extracting downloaded package...")
+            return
+        if "installing fallback dependencies" in lower:
+            self._progress.setRange(0, 0)
+            self._progress.setFormat("Installing dependencies (downloading from internet)...")
+            return
+        if "loading onnx asr model" in lower:
+            self._progress.setRange(0, 0)
+            self._progress.setFormat("Loading model...")
+            return
+        if "preparing onnx asr engine" in lower:
+            self._progress.setRange(0, 0)
+            self._progress.setFormat("Preparing ONNX model...")
+            return
         if "ready." in lower:
             self._progress.setRange(0, 1)
             self._progress.setValue(1)
@@ -437,9 +565,13 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
+    if sys.platform == "win32":
+        set_windows_app_user_model_id()
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     app = QApplication([])
-    w = MainWindow()
+    app_icon = build_app_icon()
+    app.setWindowIcon(app_icon)
+    w = MainWindow(app_icon=app_icon)
     w.show()
     raise SystemExit(app.exec())
 
