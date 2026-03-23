@@ -3,10 +3,12 @@
 Minimal Windows desktop MVP inspired by a voice-first “pipit”-style workflow.
 
 Core flow:
-- press and hold Right Alt
+- press and hold **Right Ctrl** (avoids Alt menu accelerators)
 - capture microphone audio
-- send it to a local Parakeet TDT STT endpoint
-- paste transcript into the currently active app (and also show it in the UI)
+- transcribe (default: ONNX ASR / Parakeet TDT)
+- paste into the app that had focus when you **pressed** Right Ctrl (also mirrored in this window)
+
+**Paste troubleshooting:** If text only appears here, click the target text field first, then use push-to-talk. Windows may block focus steal for elevated (Run as administrator) apps unless Pipit Clone is also elevated.
 
 ## How STT runs (Parakeet TDT on Windows)
 

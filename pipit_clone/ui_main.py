@@ -22,13 +22,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
 )
 from pynput import keyboard
-from pynput.keyboard import Controller
 
 from pipit_clone.audio_utils import float_to_int16_pcm, write_wav_from_int16_pcm
 from pipit_clone.config import Settings
 from pipit_clone.onnx_asr_engine import OnnxAsrEngine
 from pipit_clone.parakeet_windows_installer import ensure_parakeet_service
 from pipit_clone.stt_client import transcribe_wav
+from pipit_clone.win32_paste import get_foreground_hwnd, is_window, send_ctrl_v_keybd_event, set_foreground_hwnd
 
 
 class AppSignals(QObject):
@@ -85,8 +85,9 @@ class MainWindow(QMainWindow):
         self._recording = False
         self._transcribing = False
         self._ctrl_down = False
-        self._kb_controller = Controller()
         self._onnx_engine: Optional[OnnxAsrEngine] = None
+        # Window that had focus when push-to-talk started (for paste target).
+        self._paste_target_hwnd: Optional[int] = None
 
         # Hotkey listener.
         self._hotkey_listener: Optional[keyboard.Listener] = None
@@ -172,21 +173,27 @@ class MainWindow(QMainWindow):
         clipboard = QApplication.clipboard()
         previous = clipboard.text()
         clipboard.setText(text)
-        # Let clipboard update propagate before simulating Ctrl+V.
         QApplication.processEvents()
-        time.sleep(0.03)
+        time.sleep(0.02)
 
         try:
-            self._kb_controller.press(keyboard.Key.ctrl_l)
-            self._kb_controller.press("v")
-            self._kb_controller.release("v")
-            self._kb_controller.release(keyboard.Key.ctrl_l)
+            # Put focus back on the app that was active when recording started (not Pipit).
+            our_hwnd = int(self.winId()) if self.winId() else 0
+            target = self._paste_target_hwnd
+            if target and target != our_hwnd and is_window(target):
+                set_foreground_hwnd(target)
+            elif target == our_hwnd:
+                # Recording started with our window focused; try paste without stealing focus.
+                pass
+
+            # Native Win32 injection is more reliable than pynput for cross-app paste.
+            send_ctrl_v_keybd_event()
         except Exception as e:
             self.signals.errorOccurred.emit(f"Paste failed: {type(e).__name__}: {e}")
             return
 
         # Restore clipboard on Qt main thread to avoid COM initialization errors on Windows.
-        QTimer.singleShot(250, lambda: clipboard.setText(previous))
+        QTimer.singleShot(400, lambda: clipboard.setText(previous))
 
     def _ensure_engine_and_start_hotkey(self) -> None:
         def _on_status(s: str) -> None:
@@ -263,6 +270,11 @@ class MainWindow(QMainWindow):
     def _start_recording(self) -> None:
         if self._recording or self._transcribing:
             return
+
+        try:
+            self._paste_target_hwnd = get_foreground_hwnd()
+        except Exception:
+            self._paste_target_hwnd = None
 
         self._pcm_blocks = []
         self._recording = True
