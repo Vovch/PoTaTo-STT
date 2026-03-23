@@ -36,6 +36,37 @@ class AppSignals(QObject):
     transcriptAppend = Signal(str)
     transcriptReady = Signal(str)
     errorOccurred = Signal(str)
+    recordingActive = Signal(bool)
+
+
+class RecordingOverlay(QWidget):
+    """Small always-on-top marker; does not take focus or block mouse input."""
+
+    def __init__(self) -> None:
+        super().__init__(None)
+        self.setWindowFlags(
+            Qt.FramelessWindowHint
+            | Qt.WindowStaysOnTopHint
+            | Qt.Tool
+            | Qt.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setObjectName("RecordingOverlay")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(8)
+        dot = QLabel("●")
+        dot.setStyleSheet("color: #ff4444; font-size: 18px;")
+        label = QLabel("Recording")
+        label.setStyleSheet("color: #f0f0f0; font-size: 14px; font-weight: bold;")
+        layout.addWidget(dot)
+        layout.addWidget(label)
+
+        self.setStyleSheet(
+            "#RecordingOverlay { background-color: rgba(30, 30, 35, 230); "
+            "border-radius: 8px; border: 1px solid #555555; }"
+        )
 
 
 class MainWindow(QMainWindow):
@@ -75,6 +106,10 @@ class MainWindow(QMainWindow):
         self.signals.transcriptAppend.connect(self._append_transcript)
         self.signals.transcriptReady.connect(self._paste_transcript_to_active_app)
         self.signals.errorOccurred.connect(self._on_error)
+        self.signals.recordingActive.connect(self._on_recording_overlay)
+
+        self._recording_overlay = RecordingOverlay()
+        self._recording_overlay.hide()
 
         # Microphone state.
         self._sample_rate = 16000
@@ -115,6 +150,27 @@ class MainWindow(QMainWindow):
         else:
             self._transcript.setPlainText(current + "\n" + text.strip() + "\n")
         self._transcript.ensureCursorVisible()
+
+    def _position_recording_overlay(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        self._recording_overlay.adjustSize()
+        w = self._recording_overlay.width()
+        h = self._recording_overlay.height()
+        margin = 24
+        x = geo.left() + (geo.width() - w) // 2
+        y = geo.top() + geo.height() - h - margin
+        self._recording_overlay.move(x, y)
+
+    @Slot(bool)
+    def _on_recording_overlay(self, active: bool) -> None:
+        if active:
+            self._position_recording_overlay()
+            self._recording_overlay.show()
+        else:
+            self._recording_overlay.hide()
 
     @Slot(str)
     def _on_error(self, msg: str) -> None:
@@ -297,11 +353,13 @@ class MainWindow(QMainWindow):
             callback=callback,
         )
         self._stream.start()
+        self.signals.recordingActive.emit(True)
 
     def _stop_recording(self) -> None:
         if not self._recording:
             return
         self._recording = False
+        self.signals.recordingActive.emit(False)
 
         stream = self._stream
         self._stream = None

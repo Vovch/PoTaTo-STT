@@ -1,0 +1,3 @@
+# Optional: build a Windows distributable folder with PyInstaller.
+# Install with: pip install -r requirements.txt -r requirements-build.txt
+pyinstaller>=6.0

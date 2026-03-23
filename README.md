@@ -66,6 +66,29 @@ $env:PIPIT_STT_BACKEND="http"
 python -m pipit_clone
 ```
 
+## Build Windows executable (PyInstaller)
+
+The build script creates a **one-folder** bundle under `dist\PipitClone\` (recommended for Qt, ONNX Runtime, and DirectML). Ship the **entire** `PipitClone` folder, not only `PipitClone.exe`.
+
+From the project root:
+
+```powershell
+.\build_windows_exe.ps1
+```
+
+This creates `.venv` if needed, installs `requirements.txt` plus `requirements-build.txt` (PyInstaller), and runs `pipit_clone.spec`.
+
+Manual equivalent:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt -r requirements-build.txt
+python -m PyInstaller pipit_clone.spec --clean --noconfirm
+```
+
+Use a **dedicated virtual environment** that only contains this app’s dependencies. If unrelated packages (for example large ML stacks) are installed in the same environment, PyInstaller may bundle them and the output will be much larger. If `venv` recreation fails with “access denied” on `.venv\Scripts\python.exe`, close other tools that use that interpreter (editor language servers, running instances of the app), then run the script again.
+
 ## Test (manual)
 
 1. Launch Notepad (or any text field in any app).

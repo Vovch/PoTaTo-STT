@@ -24,7 +24,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Optional extras: `requirements-docker.txt`, `requirements-build.txt` (see `Dockerfile`, `build_windows_exe.ps1`).
+Optional extras: `requirements-build.txt` (see `build_windows_exe.ps1`).
 
 ## Run
 
@@ -42,7 +42,6 @@ If you add tests or CI, document the exact commands here and treat them as manda
 ## Build / packaging (when relevant)
 
 - **Windows EXE:** `.\build_windows_exe.ps1` from repo root (requires `requirements-build.txt` / PyInstaller as in the script).
-- **Docker (Linux GUI / X11):** see `docker-compose.yml` and `Dockerfile` — not a substitute for Windows desktop validation.
 
 ## Code style
 
