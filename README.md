@@ -3,10 +3,10 @@
 Minimal Windows desktop MVP inspired by a voice-first “pipit”-style workflow.
 
 Core flow:
-- press and hold **Right Ctrl** (avoids Alt menu accelerators)
+- press and hold your **push-to-talk key(s)** (default: **Right Ctrl**; configure under **Options** — add several keys or mouse buttons, or capture any key/button by choosing **Add key…**)
 - capture microphone audio
 - transcribe (default: ONNX ASR / Parakeet TDT)
-- paste into the app that had focus when you **pressed** Right Ctrl (also mirrored in this window)
+- paste into the app that had focus when you **pressed** the key (also mirrored in this window)
 
 **Paste troubleshooting:** If text only appears here, click the target text field first, then use push-to-talk. Windows may block focus steal for elevated (Run as administrator) apps unless Pipit Clone is also elevated.
 
@@ -36,8 +36,6 @@ Environment variables (optional):
 - `PIPIT_STT_BACKEND` (default: `onnx_asr`; options: `onnx_asr`, `http`)
 - `PIPIT_STT_API_URL` (default: `http://127.0.0.1:5092/v1/audio/transcriptions`)
 - `PIPIT_STT_MODEL` (default: `parakeet`)
-- `PIPIT_STT_PROMPT` (default: `en`, use `ja` for Japanese; `vi` is used by some Parakeet bundles)
-- The app window includes a **Speech language** control (English / Japanese / Vietnamese). It is saved locally and overrides the prompt sent to the HTTP Parakeet API. The default when no saved choice exists follows `PIPIT_STT_PROMPT`.
 - `PIPIT_STT_TIMEOUT_SECONDS` (default: `120`)
 - `PIPIT_ONNX_ASR_MODEL` (default: `nemo-parakeet-tdt-0.6b-v3`)
 - `PIPIT_ONNX_ASR_PROVIDERS` (default: `DmlExecutionProvider,CPUExecutionProvider`; ignored when CPU-only is on)
@@ -51,7 +49,6 @@ Example:
 
 ```powershell
 $env:PIPIT_STT_API_URL="http://127.0.0.1:5092/v1/audio/transcriptions"
-$env:PIPIT_STT_PROMPT="en"
 $env:PIPIT_STT_TIMEOUT_SECONDS="120"
 ```
 
@@ -105,7 +102,7 @@ Use a **dedicated virtual environment** that only contains this app’s dependen
 1. Launch Notepad (or any text field in any app).
 2. Start `pipit_clone`.
 3. Click into Notepad so the caret is active.
-4. Hold **Right Ctrl**, speak, then release.
+4. Hold your push-to-talk key (default **Right Ctrl**), speak, then release.
 5. Expected:
    - transcript appears in the Pipit Clone window
    - same transcript is pasted at your active cursor
@@ -120,6 +117,6 @@ The app now shows a progress bar:
 ## Notes / Limitations
 
 - `PIPIT_CPU_ONLY=1` applies to the **built-in ONNX ASR** backend (`PIPIT_STT_BACKEND=onnx_asr`). The separate **HTTP** Parakeet service (`PIPIT_STT_BACKEND=http`) runs its own Python process and may still use GPU unless you configure that stack separately.
-- This MVP uses “push-to-talk” (transcribe after you release Right Alt), not true word-level streaming.
+- This MVP uses “push-to-talk” (transcribe after you release the key), not true word-level streaming.
 - First startup can be very long in fallback mode because Python dependencies and models are downloaded.
 - If the Parakeet all-in-one package changes its local API contract, you may need to adjust `pipit_clone/stt_client.py`.

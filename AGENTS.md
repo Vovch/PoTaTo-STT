@@ -1,6 +1,6 @@
 # Agent instructions (Pipit Clone)
 
-Minimal Windows desktop voice-to-text MVP (PySide6, push-to-talk with **Right Ctrl**, Parakeet / ONNX ASR). See `README.md` for user-facing setup and behavior.
+Minimal Windows desktop voice-to-text MVP (PySide6, configurable push-to-talk key, Parakeet / ONNX ASR). See `README.md` for user-facing setup and behavior.
 
 ## Always verify your work
 
@@ -35,7 +35,7 @@ python -m pipit_clone
 
 ## Testing
 
-There is no automated test suite in this repo yet. Use the **manual** flow in `README.md` (Notepad or another app, focus the caret, hold Right Ctrl, speak, release) when you change behavior that affects capture, STT, or paste.
+There is no automated test suite in this repo yet. Use the **manual** flow in `README.md` (Notepad or another app, focus the caret, hold the push-to-talk key, speak, release) when you change behavior that affects capture, STT, or paste.
 
 If you add tests or CI, document the exact commands here and treat them as mandatory before merge.
 

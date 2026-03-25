@@ -28,8 +28,6 @@ class Settings:
         "http://127.0.0.1:5092/v1/audio/transcriptions",
     )
     stt_model: str = _getenv_str("PIPIT_STT_MODEL", "parakeet")
-    # The packaged Parakeet STT examples use `prompt="en"` or `prompt="ja"`.
-    stt_prompt: str = _getenv_str("PIPIT_STT_PROMPT", "en")
     stt_response_format: str = _getenv_str("PIPIT_STT_RESPONSE_FORMAT", "json")
     stt_timeout_seconds: int = _getenv_int("PIPIT_STT_TIMEOUT_SECONDS", 120)
     onnx_asr_model: str = _getenv_str("PIPIT_ONNX_ASR_MODEL", "nemo-parakeet-tdt-0.6b-v3")

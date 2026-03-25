@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import sys
 import tempfile
@@ -9,15 +10,32 @@ from typing import Optional
 
 import numpy as np
 import sounddevice as sd
-from PySide6.QtCore import QEvent, QObject, Qt, QSettings, Signal, Slot, QTimer
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QEvent, QObject, QRectF, QSettings, QSize, Qt, Signal, Slot, QTimer
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QEnterEvent,
+    QFont,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QApplication,
-    QComboBox,
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QSizePolicy,
@@ -26,7 +44,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from pynput import keyboard
+from pynput import keyboard, mouse
 
 from pipit_clone.audio_utils import float_to_int16_pcm, write_wav_from_int16_pcm
 from pipit_clone.config import Settings
@@ -40,6 +58,24 @@ from pipit_clone.win32_paste import (
     send_ctrl_v_keybd_event,
     set_foreground_hwnd,
     set_windows_app_user_model_id,
+)
+from pipit_clone.ptt_capture import capture_ptt_binding
+from pipit_clone.ptt_keys import (
+    DEFAULT_PTT_SPECS,
+    event_matches_any_spec_keyboard,
+    event_matches_any_spec_mouse,
+    keyboard_token_for_event,
+    load_ptt_specs,
+    mouse_token_for_button,
+    needs_keyboard_listener,
+    needs_mouse_listener,
+    save_ptt_specs,
+    spec_label,
+    specs_summary_phrase,
+)
+from pipit_clone.win32_startup import (
+    is_run_at_startup_enabled,
+    set_run_at_startup_enabled,
 )
 
 
@@ -57,7 +93,7 @@ def build_app_icon() -> QIcon:
         p.setPen(QColor("#1e40af"))
         p.drawRoundedRect(margin, margin, size - 2 * margin, size - 2 * margin, size // 6, size // 6)
         p.setPen(QColor("#ffffff"))
-        font = p.font()
+        font = QFont()
         font.setPixelSize(max(8, int(size * 0.45)))
         font.setBold(True)
         p.setFont(font)
@@ -68,6 +104,269 @@ def build_app_icon() -> QIcon:
     for s in (16, 24, 32, 48, 64, 128, 256):
         icon.addPixmap(_render(s))
     return icon
+
+
+def build_gear_icon(color: QColor, pixel_size: int = 20) -> QIcon:
+    """Vector gear centered in the pixmap (no font metrics / QToolButton baseline quirks)."""
+    pm = QPixmap(pixel_size, pixel_size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    cx = pixel_size * 0.5
+    cy = pixel_size * 0.5
+    pen = QPen(color)
+    pen.setWidthF(max(1.0, pixel_size / 14.0))
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    teeth = 8
+    r_tip = pixel_size * 0.36
+    r_valley = pixel_size * 0.22
+    path = QPainterPath()
+    for i in range(teeth * 2):
+        a = 2 * math.pi * i / (teeth * 2) - math.pi / 2
+        r = r_tip if i % 2 == 0 else r_valley
+        x = cx + r * math.cos(a)
+        y = cy + r * math.sin(a)
+        if i == 0:
+            path.moveTo(x, y)
+        else:
+            path.lineTo(x, y)
+    path.closeSubpath()
+    p.drawPath(path)
+    hole_r = pixel_size * 0.10
+    p.drawEllipse(QRectF(cx - hole_r, cy - hole_r, 2 * hole_r, 2 * hole_r))
+    p.end()
+    icon = QIcon()
+    icon.addPixmap(pm)
+    return icon
+
+
+class GearIconButton(QAbstractButton):
+    """Square button that paints the icon truly centered (avoids QToolButton style icon offset)."""
+
+    _side = 32
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._px = 20
+        self._icon = QIcon()
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedSize(self._side, self._side)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+    def setIcon(self, icon: QIcon) -> None:
+        self._icon = icon
+        self.update()
+
+    def sizeHint(self) -> QSize:
+        return QSize(self._side, self._side)
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event: QEvent) -> None:
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = self.rect()
+        bg = self.palette().color(QPalette.ColorRole.Window)
+        if self.underMouse():
+            bg = self.palette().color(QPalette.ColorRole.AlternateBase)
+        p.fillRect(r, bg)
+        border = QColor("#c0c0c0")
+        if self.underMouse():
+            border = QColor("#909090")
+        p.setPen(QPen(border))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
+        if not self._icon.isNull():
+            pm = self._icon.pixmap(self._px, self._px)
+            x = (self.width() - pm.width()) // 2
+            y = (self.height() - pm.height()) // 2
+            p.drawPixmap(x, y, pm)
+        p.end()
+
+
+class _CaptureNotifier(QObject):
+    """Marshals capture result to the UI thread."""
+
+    finished = Signal(object)
+
+
+class PttCaptureDialog(QDialog):
+    """Modal capture: first key or mouse button wins; Cancel / Escape abort."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add push-to-talk key")
+        self.setModal(True)
+        self._cancel = threading.Event()
+        self._notifier = _CaptureNotifier(self)
+        self._notifier.finished.connect(self._on_capture_finished)
+        self._captured_spec = ""
+        self._capture_started = False
+        v = QVBoxLayout(self)
+        v.addWidget(
+            QLabel(
+                "Press a keyboard key or click a mouse button.\n"
+                "Escape cancels. The first input is saved."
+            )
+        )
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        bb.rejected.connect(self._on_cancel_clicked)
+        v.addWidget(bb)
+
+    def reject(self) -> None:
+        self._cancel.set()
+        super().reject()
+
+    def closeEvent(self, event: QEvent) -> None:
+        self._cancel.set()
+        super().closeEvent(event)
+
+    def showEvent(self, event: QEvent) -> None:
+        super().showEvent(event)
+        if not self._capture_started:
+            self._capture_started = True
+            threading.Thread(target=self._run_capture, daemon=True).start()
+
+    def _run_capture(self) -> None:
+        spec = capture_ptt_binding(cancel_event=self._cancel, timeout_seconds=120.0)
+        self._notifier.finished.emit(spec)
+
+    @Slot()
+    def _on_cancel_clicked(self) -> None:
+        self._cancel.set()
+
+    @Slot(object)
+    def _on_capture_finished(self, spec: object) -> None:
+        if isinstance(spec, str) and spec:
+            self._captured_spec = spec
+            self.accept()
+        else:
+            self.reject()
+
+    def captured_spec(self) -> Optional[str]:
+        return self._captured_spec or None
+
+
+class OptionsWindow(QWidget):
+    """Separate top-level window for app settings."""
+
+    def __init__(self, main_window: QWidget, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._main = main_window
+        self._settings = QSettings("PipitClone", "PipitClone")
+        self.setWindowTitle("Options")
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint)
+        self.setMinimumWidth(420)
+
+        layout = QVBoxLayout(self)
+        if sys.platform == "win32":
+            self._startup_cb = QCheckBox("Launch Pipit Clone at Windows startup")
+            self._startup_cb.setChecked(is_run_at_startup_enabled())
+            self._startup_cb.toggled.connect(self._on_startup_toggled)
+            layout.addWidget(self._startup_cb)
+        else:
+            _hint = QLabel("Launch at startup is only available on Windows.")
+            _hint.setWordWrap(True)
+            layout.addWidget(_hint)
+
+        layout.addWidget(QLabel("Push-to-talk keys (hold any of these):"))
+        self._ptt_list = QListWidget()
+        self._ptt_list.setMinimumHeight(120)
+        layout.addWidget(self._ptt_list)
+        _btn_row = QHBoxLayout()
+        self._add_ptt_btn = QPushButton("Add key…")
+        self._add_ptt_btn.clicked.connect(self._on_add_ptt_clicked)
+        self._remove_ptt_btn = QPushButton("Remove selected")
+        self._remove_ptt_btn.clicked.connect(self._on_remove_ptt_clicked)
+        _btn_row.addWidget(self._add_ptt_btn)
+        _btn_row.addWidget(self._remove_ptt_btn)
+        _btn_row.addStretch(1)
+        layout.addLayout(_btn_row)
+        _ptt_help = QLabel(
+            "Recording continues while at least one bound key or button is held. "
+            "If you remove every key, Right Ctrl is used again."
+        )
+        _ptt_help.setWordWrap(True)
+        _ptt_help.setStyleSheet("color: #888888; font-size: 11px;")
+        layout.addWidget(_ptt_help)
+
+        layout.addStretch(1)
+        self._populate_ptt_list()
+
+    def _populate_ptt_list(self) -> None:
+        self._ptt_list.clear()
+        for spec in load_ptt_specs(self._settings):
+            it = QListWidgetItem(spec_label(spec))
+            it.setData(Qt.ItemDataRole.UserRole, spec)
+            self._ptt_list.addItem(it)
+
+    def _save_ptt_list_from_ui(self) -> None:
+        specs: list[str] = []
+        for i in range(self._ptt_list.count()):
+            item = self._ptt_list.item(i)
+            d = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(d, str):
+                specs.append(d)
+        if not specs:
+            specs = list(DEFAULT_PTT_SPECS)
+        save_ptt_specs(self._settings, specs)
+        fn = getattr(self._main, "_on_ptt_key_setting_changed", None)
+        if fn is not None:
+            fn()
+        self._populate_ptt_list()
+
+    @Slot()
+    def _on_add_ptt_clicked(self) -> None:
+        dlg = PttCaptureDialog(self)
+        dlg.resize(420, 140)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        spec = dlg.captured_spec()
+        if not spec:
+            return
+        for i in range(self._ptt_list.count()):
+            if self._ptt_list.item(i).data(Qt.ItemDataRole.UserRole) == spec:
+                QMessageBox.information(self, "Push-to-talk", "That key is already in the list.")
+                return
+        it = QListWidgetItem(spec_label(spec))
+        it.setData(Qt.ItemDataRole.UserRole, spec)
+        self._ptt_list.addItem(it)
+        self._save_ptt_list_from_ui()
+
+    @Slot()
+    def _on_remove_ptt_clicked(self) -> None:
+        row = self._ptt_list.currentRow()
+        if row < 0:
+            return
+        self._ptt_list.takeItem(row)
+        self._save_ptt_list_from_ui()
+
+    def sync_ptt_from_settings(self) -> None:
+        self._populate_ptt_list()
+
+    @Slot(bool)
+    def _on_startup_toggled(self, checked: bool) -> None:
+        try:
+            set_run_at_startup_enabled(checked)
+        except OSError as e:
+            self._startup_cb.blockSignals(True)
+            self._startup_cb.setChecked(not checked)
+            self._startup_cb.blockSignals(False)
+            QMessageBox.warning(
+                self,
+                "Startup setting",
+                f"Could not update the Windows startup entry:\n{e}",
+            )
 
 
 class AppSignals(QObject):
@@ -111,49 +410,24 @@ class RecordingOverlay(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, app_icon: Optional[QIcon] = None) -> None:
         super().__init__()
-        self.setWindowTitle("Pipit Clone (Parakeet TDT STT) - Right Ctrl Push-to-Talk")
+        self.setWindowTitle("Pipit Clone (Parakeet TDT STT) — Push-to-talk")
         self.setMinimumWidth(820)
 
         self._app_icon = app_icon if app_icon is not None else build_app_icon()
         self.setWindowIcon(self._app_icon)
 
         self.settings = Settings()
-        self._settings_store = QSettings("PipitClone", "PipitClone")
-        _default_lang = self.settings.stt_prompt
-        _saved_lang = self._settings_store.value("speech_language_code", _default_lang, type=str)
-        _valid_langs = frozenset({"en", "ja", "vi"})
-        self._speech_language_code: str = _saved_lang if _saved_lang in _valid_langs else _default_lang
+        self._qsettings = QSettings("PipitClone", "PipitClone")
+        self._ptt_specs: list[str] = load_ptt_specs(self._qsettings)
+        self._stt_engine_ready = False
 
         self._status_label = QLabel("Initializing...")
         self._transcript = QTextEdit()
         self._transcript.setReadOnly(True)
         self._transcript.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self._help_label = QLabel("Hold Right Ctrl to record. Release to transcribe.")
+        self._help_label = QLabel("")
         self._help_label.setWordWrap(True)
-
-        self._speech_language_combo = QComboBox()
-        for _code, _label in (
-            ("en", "English"),
-            ("ja", "Japanese (日本語)"),
-            ("vi", "Vietnamese"),
-        ):
-            self._speech_language_combo.addItem(_label, _code)
-        _lang_idx = self._speech_language_combo.findData(self._speech_language_code)
-        if _lang_idx < 0:
-            _lang_idx = self._speech_language_combo.findData("en")
-        self._speech_language_combo.setCurrentIndex(max(0, _lang_idx))
-        self._speech_language_code = str(self._speech_language_combo.currentData())
-        self._speech_language_combo.currentIndexChanged.connect(self._on_speech_language_changed)
-
-        _lang_row = QHBoxLayout()
-        _lang_row.addWidget(QLabel("Speech language:"))
-        _lang_row.addWidget(self._speech_language_combo, 1)
-        _lang_help = QLabel(
-            "HTTP backend: sent as API `prompt`. ONNX backend: one model; this setting may not change output."
-        )
-        _lang_help.setWordWrap(True)
-        _lang_help.setStyleSheet("color: #888888; font-size: 11px;")
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)
@@ -162,11 +436,23 @@ class MainWindow(QMainWindow):
         self._quit_btn = QPushButton("Quit")
         self._quit_btn.clicked.connect(self.close)
 
+        self._options_win: Optional[OptionsWindow] = None
+
+        _header = QHBoxLayout()
+        self._options_btn = GearIconButton()
+        self._options_btn.setToolTip("Options")
+        _gear_px = 20
+        self._options_btn.setIcon(
+            build_gear_icon(self.palette().color(QPalette.ColorRole.WindowText), pixel_size=_gear_px)
+        )
+        self._options_btn.clicked.connect(self._open_options)
+        _header.addWidget(self._options_btn)
+        _header.addStretch(1)
+
         root = QWidget()
         layout = QVBoxLayout()
+        layout.addLayout(_header)
         layout.addWidget(self._help_label)
-        layout.addLayout(_lang_row)
-        layout.addWidget(_lang_help)
         layout.addWidget(self._status_label)
         layout.addWidget(self._progress)
         layout.addLayout(QHBoxLayout())
@@ -193,19 +479,19 @@ class MainWindow(QMainWindow):
         self._stream: Optional[sd.InputStream] = None
         self._recording = False
         self._transcribing = False
-        self._ctrl_down = False
+        self._ptt_hold_tokens: set[str] = set()
         self._onnx_engine: Optional[OnnxAsrEngine] = None
         # Window that had focus when push-to-talk started (for paste target).
         self._paste_target_hwnd: Optional[int] = None
 
-        # Hotkey listener.
-        self._hotkey_listener: Optional[keyboard.Listener] = None
+        self._keyboard_listener: Optional[keyboard.Listener] = None
+        self._mouse_listener: Optional[mouse.Listener] = None
 
         self._tray_icon: Optional[QSystemTrayIcon] = None
         if QSystemTrayIcon.isSystemTrayAvailable():
             tray = QSystemTrayIcon(self)
             tray.setIcon(self._app_icon)
-            tray.setToolTip("Pipit Clone — hold Right Ctrl to talk")
+            tray.setToolTip(f"Pipit Clone — hold {specs_summary_phrase(self._ptt_specs)} to talk")
             tray_menu = QMenu()
             act_show = QAction("Show", self)
             act_show.triggered.connect(self._show_from_tray)
@@ -217,10 +503,8 @@ class MainWindow(QMainWindow):
             tray.activated.connect(self._on_tray_activated)
             tray.show()
             self._tray_icon = tray
-            self._help_label.setText(
-                "Hold Right Ctrl to record. Release to transcribe. "
-                "Minimize the window to send it to the system tray (double-click the tray icon to restore)."
-            )
+
+        self._update_ptt_help_text()
 
         # Start engine ensure in background, then register hotkey.
         threading.Thread(target=self._ensure_engine_and_start_hotkey, daemon=True).start()
@@ -261,11 +545,7 @@ class MainWindow(QMainWindow):
     def _shutdown(self) -> None:
         if self._tray_icon is not None:
             self._tray_icon.hide()
-        try:
-            if self._hotkey_listener is not None:
-                self._hotkey_listener.stop()
-        except Exception:
-            pass
+        self._stop_hotkey_listeners()
         try:
             self._stop_recording()
         except Exception:
@@ -275,13 +555,47 @@ class MainWindow(QMainWindow):
         self._shutdown()
         super().closeEvent(event)
 
+    def _stop_hotkey_listeners(self) -> None:
+        for attr in ("_keyboard_listener", "_mouse_listener"):
+            lst = getattr(self, attr, None)
+            if lst is not None:
+                try:
+                    lst.stop()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+    def _update_ptt_help_text(self) -> None:
+        ptt = specs_summary_phrase(self._ptt_specs)
+        text = f"Hold {ptt} to record. Release to transcribe."
+        if self._tray_icon is not None:
+            text += (
+                " Minimize the window to send it to the system tray "
+                "(double-click the tray icon to restore)."
+            )
+            self._tray_icon.setToolTip(f"Pipit Clone — hold {ptt} to talk")
+        self._help_label.setText(text)
+
     @Slot()
-    def _on_speech_language_changed(self) -> None:
-        code = self._speech_language_combo.currentData()
-        if not isinstance(code, str) or not code:
+    def _on_ptt_key_setting_changed(self) -> None:
+        self._ptt_specs = load_ptt_specs(self._qsettings)
+        self._update_ptt_help_text()
+        self.restart_ptt_listeners()
+
+    def restart_ptt_listeners(self) -> None:
+        if not self._stt_engine_ready:
             return
-        self._speech_language_code = code
-        self._settings_store.setValue("speech_language_code", code)
+        self._stop_hotkey_listeners()
+        self._register_hotkey()
+
+    @Slot()
+    def _open_options(self) -> None:
+        if self._options_win is None:
+            self._options_win = OptionsWindow(self)
+        self._options_win.sync_ptt_from_settings()
+        self._options_win.show()
+        self._options_win.raise_()
+        self._options_win.activateWindow()
 
     @Slot(str)
     def _append_transcript(self, text: str) -> None:
@@ -464,40 +778,61 @@ class MainWindow(QMainWindow):
             self.signals.errorOccurred.emit(f"{type(e).__name__}: {e}")
             return
 
-        _on_status("Ready. Hold Right Ctrl to talk.")
+        self._stt_engine_ready = True
+        _on_status(f"Ready. Hold {specs_summary_phrase(self._ptt_specs)} to talk.")
         self._register_hotkey()
 
+    def _add_ptt_token(self, token: str) -> None:
+        before = len(self._ptt_hold_tokens)
+        self._ptt_hold_tokens.add(token)
+        if before == 0 and len(self._ptt_hold_tokens) > 0:
+            self.signals.statusChanged.emit(
+                f"{specs_summary_phrase(self._ptt_specs)} — recording..."
+            )
+            self._start_recording()
+
+    def _remove_ptt_token(self, token: str) -> None:
+        self._ptt_hold_tokens.discard(token)
+        if len(self._ptt_hold_tokens) == 0:
+            self._stop_recording_and_transcribe()
+
     def _register_hotkey(self) -> None:
-        if self._hotkey_listener is not None:
-            return
-
-        def _is_ptt_key(key) -> bool:  # type: ignore[no-untyped-def]
-            # Support Right Ctrl variants across layouts:
-            # - Right Ctrl (ctrl_r)
-            # - virtual-key 163
-            if key == keyboard.Key.ctrl_r:
-                return True
-
-            vk = getattr(key, "vk", None)
-            return vk == 163
-
-        def on_press(key) -> None:
-            if _is_ptt_key(key):
-                # Start recording on the press.
-                if not self._ctrl_down:
-                    self._ctrl_down = True
-                    self.signals.statusChanged.emit("Right Ctrl detected. Recording...")
-                    self._start_recording()
-
-        def on_release(key) -> None:
-            if _is_ptt_key(key):
-                self._ctrl_down = False
-                self._stop_recording_and_transcribe()
+        self._stop_hotkey_listeners()
+        self._ptt_hold_tokens.clear()
+        self._ptt_specs = load_ptt_specs(self._qsettings)
+        specs = self._ptt_specs
 
         try:
-            self._hotkey_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-            self._hotkey_listener.daemon = True
-            self._hotkey_listener.start()
+            if needs_keyboard_listener(specs):
+
+                def on_press(key) -> None:  # type: ignore[no-untyped-def]
+                    if not event_matches_any_spec_keyboard(specs, key):
+                        return
+                    self._add_ptt_token(keyboard_token_for_event(key))
+
+                def on_release(key) -> None:  # type: ignore[no-untyped-def]
+                    if not event_matches_any_spec_keyboard(specs, key):
+                        return
+                    self._remove_ptt_token(keyboard_token_for_event(key))
+
+                self._keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+                self._keyboard_listener.daemon = True
+                self._keyboard_listener.start()
+
+            if needs_mouse_listener(specs):
+
+                def on_click(x, y, button, pressed) -> None:  # type: ignore[no-untyped-def]
+                    if not event_matches_any_spec_mouse(specs, button):
+                        return
+                    tok = mouse_token_for_button(button)
+                    if pressed:
+                        self._add_ptt_token(tok)
+                    else:
+                        self._remove_ptt_token(tok)
+
+                self._mouse_listener = mouse.Listener(on_click=on_click)
+                self._mouse_listener.daemon = True
+                self._mouse_listener.start()
         except Exception as e:
             self.signals.errorOccurred.emit(f"Hotkey init failed: {type(e).__name__}: {e}")
 
@@ -512,7 +847,9 @@ class MainWindow(QMainWindow):
 
         self._pcm_blocks = []
         self._recording = True
-        self.signals.statusChanged.emit("Recording... (release Right Ctrl to transcribe)")
+        self.signals.statusChanged.emit(
+            f"Recording... (release {specs_summary_phrase(self._ptt_specs)} to transcribe)"
+        )
 
         def callback(indata, frames, time_info, status):  # type: ignore[no-untyped-def]
             if not self._recording:
@@ -574,14 +911,15 @@ class MainWindow(QMainWindow):
         pcm = np.concatenate(blocks)
         # Skip extremely short clips (accidental ctrl taps).
         if pcm.shape[0] < int(self._sample_rate * 0.35):
-            self.signals.statusChanged.emit("Too short; hold Right Ctrl and speak more.")
+            self.signals.statusChanged.emit(
+                f"Too short; hold {specs_summary_phrase(self._ptt_specs)} and speak more."
+            )
             return
 
         self._transcribing = True
         self.signals.statusChanged.emit("Transcribing...")
 
         def _job(pcm_data: np.ndarray) -> None:
-            speech_lang = self._speech_language_code
             try:
                 with tempfile.TemporaryDirectory(prefix="pipit-audio-") as tmpdir:
                     wav_path = os.path.join(tmpdir, f"talk_{int(time.time()*1000)}.wav")
@@ -591,15 +929,12 @@ class MainWindow(QMainWindow):
                     if self.settings.stt_backend.lower() == "onnx_asr":
                         if self._onnx_engine is None:
                             raise RuntimeError("ONNX ASR engine is not initialized.")
-                        text = self._onnx_engine.transcribe_wav(
-                            wav_path, language=speech_lang
-                        )
+                        text = self._onnx_engine.transcribe_wav(wav_path)
                     else:
                         text = transcribe_wav(
                             wav_path,
                             api_url=self.settings.stt_api_url,
                             model=self.settings.stt_model,
-                            prompt=speech_lang,
                             response_format=self.settings.stt_response_format,
                             timeout_seconds=self.settings.stt_timeout_seconds,
                         )
@@ -608,7 +943,10 @@ class MainWindow(QMainWindow):
                     if cleaned:
                         self.signals.transcriptAppend.emit(cleaned)
                         self.signals.transcriptReady.emit(cleaned)
-                    self.signals.statusChanged.emit(f"Transcribed in {took:.1f}s. Ready. Hold Right Ctrl to talk.")
+                    self.signals.statusChanged.emit(
+                        f"Transcribed in {took:.1f}s. Ready. Hold "
+                        f"{specs_summary_phrase(self._ptt_specs)} to talk."
+                    )
             except Exception as e:
                 self.signals.errorOccurred.emit(f"{type(e).__name__}: {e}")
             finally:
@@ -617,11 +955,27 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_job, args=(pcm,), daemon=True).start()
 
 
+def _normalize_application_font(app: QApplication) -> None:
+    """Windows high-DPI defaults sometimes leave QFont.pointSize() at -1; Qt then warns if
+    something calls setPointSize with that value. Force a positive point size.
+    """
+    f = QFont(app.font())
+    if f.pointSize() > 0:
+        return
+    px = f.pixelSize()
+    if px > 0:
+        f.setPointSize(max(1, int(round(px * 72.0 / 96.0))))
+    else:
+        f.setPointSize(9)
+    app.setFont(f)
+
+
 def main() -> None:
     if sys.platform == "win32":
         set_windows_app_user_model_id()
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     app = QApplication([])
+    _normalize_application_font(app)
     app_icon = build_app_icon()
     app.setWindowIcon(app_icon)
     w = MainWindow(app_icon=app_icon)
