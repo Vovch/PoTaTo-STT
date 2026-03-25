@@ -28,8 +28,6 @@ class Settings:
         "http://127.0.0.1:5092/v1/audio/transcriptions",
     )
     stt_model: str = _getenv_str("PIPIT_STT_MODEL", "parakeet")
-    # The packaged Parakeet STT examples use `prompt="en"` or `prompt="ja"`.
-    stt_prompt: str = _getenv_str("PIPIT_STT_PROMPT", "en")
     stt_response_format: str = _getenv_str("PIPIT_STT_RESPONSE_FORMAT", "json")
     stt_timeout_seconds: int = _getenv_int("PIPIT_STT_TIMEOUT_SECONDS", 120)
     onnx_asr_model: str = _getenv_str("PIPIT_ONNX_ASR_MODEL", "nemo-parakeet-tdt-0.6b-v3")
@@ -38,6 +36,8 @@ class Settings:
         "PIPIT_ONNX_ASR_PROVIDERS",
         "DmlExecutionProvider,CPUExecutionProvider",
     )
+    # When 1, ONNX ASR uses CPU only (no DirectML/GPU); ignores PIPIT_ONNX_ASR_PROVIDERS.
+    cpu_only: bool = _getenv_int("PIPIT_CPU_ONLY", 0) == 1
 
     # Download/extract the official Windows all-in-one package on first run.
     parakeet_win_url: str = _getenv_str(

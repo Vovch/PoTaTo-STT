@@ -44,9 +44,7 @@ def transcribe_wav(
     *,
     api_url: str,
     model: Optional[str] = None,
-    prompt: Optional[str] = None,
     response_format: Optional[str] = None,
-    language: Optional[str] = None,
     timeout_seconds: int = 120,
 ) -> str:
     wav_path = Path(wav_path)
@@ -57,19 +55,11 @@ def transcribe_wav(
         files = {"file": (wav_path.name, f, "audio/wav")}
         data = {}
 
-        # Parakeet packaged service follows an OpenAI-like multipart contract:
-        # - model=parakeet
-        # - prompt=en|ja
-        # - response_format=json|srt|...
-        # But other wrappers might use a different schema; keep `language` as fallback.
+        # Parakeet packaged service follows an OpenAI-like multipart contract (model, response_format, etc.).
         if model is not None:
             data["model"] = model
-        if prompt is not None:
-            data["prompt"] = prompt
         if response_format is not None:
             data["response_format"] = response_format
-        if language is not None and all(k not in data for k in ("prompt", "model")):
-            data["language"] = language
 
         resp = requests.post(
             api_url,
