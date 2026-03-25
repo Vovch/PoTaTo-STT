@@ -60,8 +60,9 @@ try:
 except Exception:
     pass
 
-# Launcher that sets PIPIT_CPU_ONLY=1 (bundled next to PipitClone.exe).
-datas += [(os.path.join(spec_root, "PipitCloneCPU.bat"), ".")]
+# PipitCloneCPU.bat is not listed here: PyInstaller places `datas` under _internal/,
+# but the launcher must sit next to PipitClone.exe. build_windows_exe.ps1 copies it
+# into dist/PipitClone/ after the build.
 
 a = Analysis(
     [os.path.join(spec_root, "pipit_clone", "__main__.py")],

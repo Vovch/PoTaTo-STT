@@ -22,7 +22,17 @@ Write-Host "Installing dependencies into .venv ..." -ForegroundColor Cyan
 Write-Host "Running PyInstaller ..." -ForegroundColor Cyan
 & $VenvPython -m PyInstaller "$Root\pipit_clone.spec" --clean --noconfirm
 
+$DistOut = Join-Path $Root "dist\PipitClone"
+$CpuBatSrc = Join-Path $Root "PipitCloneCPU.bat"
+$CpuBatDst = Join-Path $DistOut "PipitCloneCPU.bat"
+if (Test-Path $DistOut) {
+    Copy-Item -Path $CpuBatSrc -Destination $CpuBatDst -Force
+    Write-Host "Copied PipitCloneCPU.bat next to PipitClone.exe." -ForegroundColor Cyan
+} else {
+    Write-Warning "dist\PipitClone not found - skipping PipitCloneCPU.bat copy."
+}
+
 Write-Host ""
 Write-Host "Done. Run: $($Root)\dist\PipitClone\PipitClone.exe" -ForegroundColor Green
 Write-Host "CPU-only: $($Root)\dist\PipitClone\PipitCloneCPU.bat (sets PIPIT_CPU_ONLY=1)" -ForegroundColor Green
-Write-Host "Ship the entire dist\PipitClone folder (DLLs live next to the .exe)." -ForegroundColor Yellow
+Write-Host 'Ship the entire dist\PipitClone folder (DLLs live next to PipitClone.exe).' -ForegroundColor Yellow

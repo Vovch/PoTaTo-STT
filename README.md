@@ -91,9 +91,10 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt -r requirements-build.txt
 python -m PyInstaller pipit_clone.spec --clean --noconfirm
+Copy-Item -Force PipitCloneCPU.bat dist\PipitClone\PipitCloneCPU.bat
 ```
 
-The build places **`PipitCloneCPU.bat`** in `dist\PipitClone\` next to `PipitClone.exe`. Use it to start the app with **`PIPIT_CPU_ONLY=1`** (ONNX on CPU only). The same `PipitCloneCPU.bat` in the repo root can launch from source: it runs `PipitClone.exe` when present, otherwise `.venv\python` or `python -m pipit_clone`.
+The build script copies **`PipitCloneCPU.bat`** into `dist\PipitClone\` next to `PipitClone.exe` (PyInstaller alone puts bundled data under `_internal`, so the batch file is copied separately). Use it to start the app with **`PIPIT_CPU_ONLY=1`** (ONNX on CPU only). The same `PipitCloneCPU.bat` in the repo root can launch from source: it runs `PipitClone.exe` when present, otherwise `.venv\python` or `python -m pipit_clone`.
 
 Use a **dedicated virtual environment** that only contains this app’s dependencies. If unrelated packages (for example large ML stacks) are installed in the same environment, PyInstaller may bundle them and the output will be much larger. If `venv` recreation fails with “access denied” on `.venv\Scripts\python.exe`, close other tools that use that interpreter (editor language servers, running instances of the app), then run the script again.
 
