@@ -78,6 +78,9 @@ from pipit_clone.win32_startup import (
     set_run_at_startup_enabled,
 )
 
+# QSettings key (same org/app as push-to-talk keys).
+START_MINIMIZED_SETTING = "ui/start_minimized"
+
 
 def build_app_icon() -> QIcon:
     """Raster icon for window + tray (no bundled image assets)."""
@@ -279,6 +282,17 @@ class OptionsWindow(QWidget):
             _hint.setWordWrap(True)
             layout.addWidget(_hint)
 
+        self._start_min_cb = QCheckBox("Start minimized")
+        self._start_min_cb.setChecked(
+            bool(self._settings.value(START_MINIMIZED_SETTING, False, type=bool))
+        )
+        self._start_min_cb.setToolTip(
+            "When a system tray icon is available, the main window stays hidden until you open it from the tray. "
+            "Otherwise the window opens minimized to the taskbar."
+        )
+        self._start_min_cb.toggled.connect(self._on_start_minimized_toggled)
+        layout.addWidget(self._start_min_cb)
+
         layout.addWidget(QLabel("Push-to-talk keys (hold any of these):"))
         self._ptt_list = QListWidget()
         self._ptt_list.setMinimumHeight(120)
@@ -367,6 +381,10 @@ class OptionsWindow(QWidget):
                 "Startup setting",
                 f"Could not update the Windows startup entry:\n{e}",
             )
+
+    @Slot(bool)
+    def _on_start_minimized_toggled(self, checked: bool) -> None:
+        self._settings.setValue(START_MINIMIZED_SETTING, bool(checked))
 
 
 class AppSignals(QObject):
@@ -508,6 +526,9 @@ class MainWindow(QMainWindow):
 
         # Start engine ensure in background, then register hotkey.
         threading.Thread(target=self._ensure_engine_and_start_hotkey, daemon=True).start()
+
+    def has_system_tray(self) -> bool:
+        return self._tray_icon is not None
 
     def changeEvent(self, event: QEvent) -> None:
         if (
@@ -979,7 +1000,15 @@ def main() -> None:
     app_icon = build_app_icon()
     app.setWindowIcon(app_icon)
     w = MainWindow(app_icon=app_icon)
-    w.show()
+    start_minimized = bool(
+        w._qsettings.value(START_MINIMIZED_SETTING, False, type=bool)
+    )
+    if start_minimized:
+        if not w.has_system_tray():
+            w.showMinimized()
+        # else: tray is already shown in MainWindow.__init__; main window stays hidden
+    else:
+        w.show()
     raise SystemExit(app.exec())
 
 
