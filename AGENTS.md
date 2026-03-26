@@ -2,16 +2,55 @@
 
 Minimal Windows desktop voice-to-text MVP (PySide6, configurable push-to-talk key, Parakeet / ONNX ASR). See `README.md` for user-facing setup and behavior.
 
+## Best practices for this repository
+
+- **Scope:** Keep diffs minimal and tied to the request. Avoid drive-by refactors, unrelated file churn, and extra documentation unless the user asks for it.
+- **Consistency:** Match naming, layout, and patterns already used in `pipit_clone/`. Reuse helpers instead of duplicating logic.
+- **Windows-first:** The app targets desktop Windows (audio, tray, global hotkeys, optional EXE). Consider tray, minimized startup, and focus behavior when changing the main window or options.
+- **Contracts:** Environment variables, model paths, and STT behavior belong in `README.md` when user-visible; keep code and docs aligned when those contracts change.
+- **Dependencies:** Prefer the versions pinned in `requirements.txt` / `requirements-build.txt`. If you add or upgrade a package, say so and update the appropriate requirements file.
+- **Qt / settings:** `QSettings` uses org/app `PipitClone` / `PipitClone` in several places; keep keys consistent when adding persisted UI state.
+
 ## Always verify your work
 
 Before you consider a task done:
 
-1. **Run what you changed.** After editing Python, at minimum import or launch the app so obvious errors surface (e.g. activate the venv and run `python -m pipit_clone`, or a focused one-liner that exercises the module you touched).
+1. **Run what you changed.** After editing Python, at minimum import the affected modules or launch the app so obvious errors surface (see [Running and building after changes](#running-and-building-after-changes) below).
 2. **Check diagnostics** on files you edited (editor/linter diagnostics; fix new issues you introduced).
-3. **Prefer automated checks when they exist.** If the project adds formatters, linters, or tests later, run the commands documented below and keep them green.
-4. **If you cannot run the app** (headless environment, missing audio/GPU), say what you verified instead (syntax, static reasoning, partial command output) and what remains for a human.
+3. **Prefer automated checks when they exist.** If the project adds formatters, linters, or tests later, run the commands documented here and keep them green.
+4. **If you cannot run the app** (headless environment, missing audio/GPU), say what you verified instead (syntax, `py_compile`, import checks, partial command output) and what remains for a human.
 
 Skipping verification because a change “looks obvious” is not acceptable.
+
+### Running and building after changes
+
+Use the repo-root `.venv` (create it if missing: `python -m venv .venv`).
+
+**Minimum after most code changes**
+
+```powershell
+Set-Location <repo-root>
+.\.venv\Scripts\python.exe -c "import pipit_clone.ui_main; print('import ok')"
+```
+
+For UI, startup, or integration paths, also start the app briefly (it should not exit immediately with a traceback):
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pipit_clone
+```
+
+**When to run a full Windows EXE build**
+
+Run `.\build_windows_exe.ps1` from the repository root when your changes could affect the frozen bundle, for example:
+
+- `pipit_clone/ui_main.py` or other entry/import paths used by the packaged app
+- `pipit_clone.spec`, PyInstaller hooks, or `requirements.txt` / `requirements-build.txt`
+- Native DLL loading, resource paths, or anything that behaves differently under PyInstaller
+
+The script installs runtime + build requirements into `.venv`, runs PyInstaller, and writes `dist\PipitClone\` (ship the entire folder, not only `PipitClone.exe`). Confirm the script exits successfully; when you have an interactive desktop, optionally smoke-test `dist\PipitClone\PipitClone.exe`.
+
+Trivial edits (comments only, typo in markdown with no build impact, etc.) do not require a full EXE build, but still run an import or relevant check when practical.
 
 ## Environment
 
@@ -41,7 +80,7 @@ If you add tests or CI, document the exact commands here and treat them as manda
 
 ## Build / packaging (when relevant)
 
-- **Windows EXE:** `.\build_windows_exe.ps1` from repo root (requires `requirements-build.txt` / PyInstaller as in the script).
+- **Windows EXE:** `.\build_windows_exe.ps1` from repo root (requires `requirements-build.txt` / PyInstaller as in the script). Output: `dist\PipitClone\` including `PipitClone.exe` and `_internal\`. CPU-only launcher: `PipitCloneCPU.bat` in the same folder.
 
 ## Code style
 
