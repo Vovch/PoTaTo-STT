@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -364,21 +365,39 @@ class RecordingOverlay(QWidget):
             | Qt.WindowTransparentForInput
         )
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        # Frameless top-level windows often ignore root border stylesheets on Windows;
+        # translucent outer + bordered inner QFrame paints reliably.
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setObjectName("RecordingOverlay")
+        self.setStyleSheet("#RecordingOverlay { background: transparent; }")
 
-        layout = QHBoxLayout(self)
+        outer = QVBoxLayout(self)
+        # Inset so the panel border is not clipped by the native window edge.
+        outer.setContentsMargins(4, 4, 4, 4)
+
+        panel = QFrame()
+        panel.setObjectName("RecordingOverlayPanel")
+        panel.setFrameShape(QFrame.Shape.NoFrame)
+        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        outer.addWidget(panel)
+
+        layout = QHBoxLayout(panel)
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         dot = QLabel("●")
-        dot.setStyleSheet("color: #ff4444; font-size: 18px;")
+        # Bullet glyphs often sit low in the font box vs. Latin text; nudge up for optical alignment.
+        dot.setStyleSheet("color: #ff4444; font-size: 18px; margin-top: -3px;")
+        dot.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
         label = QLabel("Recording")
         label.setStyleSheet("color: #f0f0f0; font-size: 14px; font-weight: bold;")
-        layout.addWidget(dot)
-        layout.addWidget(label)
+        label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self.setStyleSheet(
-            "#RecordingOverlay { background-color: rgba(30, 30, 35, 230); "
-            "border-radius: 8px; border: 1px solid #555555; }"
+        panel.setStyleSheet(
+            "#RecordingOverlayPanel { background-color: rgba(30, 30, 35, 230); "
+            "border-radius: 8px; border: 2px solid #ffffff; }"
         )
 
 
