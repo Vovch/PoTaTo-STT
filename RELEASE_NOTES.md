@@ -1,6 +1,6 @@
 # Release notes
 
-## Potato STT — 2026-03-28 (commit `8b77d78`)
+## Potato STT v1.3 — 2026-03-28 (commit `8b77d78`)
 
 **Subject:** Rename to Potato STT; file transcription, tests, and UI polish.
 

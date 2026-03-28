@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -11,10 +12,11 @@ from typing import Optional
 
 import numpy as np
 import sounddevice as sd
-from PySide6.QtCore import QEvent, QObject, QRectF, QSettings, QSize, Qt, Signal, Slot, QTimer
+from PySide6.QtCore import QEvent, QObject, QRectF, QSettings, QSize, Qt, QUrl, Signal, Slot, QTimer
 from PySide6.QtGui import (
     QAction,
     QColor,
+    QDesktopServices,
     QFont,
     QIcon,
     QPainter,
@@ -50,6 +52,7 @@ from pynput import keyboard, mouse
 
 from potato_stt.audio_utils import float_to_int16_pcm, write_wav_from_int16_pcm
 from potato_stt.config import Settings
+from potato_stt.data_cleanup import clear_data_script_path
 from potato_stt.file_transcribe import transcribe_file_to_text_and_cues
 from potato_stt.onnx_asr_engine import OnnxAsrEngine
 from potato_stt.parakeet_windows_installer import ensure_parakeet_service
@@ -437,6 +440,12 @@ class MainWindow(QMainWindow):
         act_options_menu.triggered.connect(self._open_options)
         _settings_menu.addAction(act_options_menu)
 
+        if sys.platform == "win32":
+            _help_menu = self.menuBar().addMenu("&Help")
+            act_clear_data = QAction("Clear local data (uninstall caches)…", self)
+            act_clear_data.triggered.connect(self._on_clear_local_data)
+            _help_menu.addAction(act_clear_data)
+
         _toolbar = QToolBar("Main")
         _toolbar.setMovable(False)
         _toolbar.setFloatable(False)
@@ -501,6 +510,10 @@ class MainWindow(QMainWindow):
             act_tray_file = QAction("Transcribe media file…", self)
             act_tray_file.triggered.connect(self._on_transcribe_file_chosen)
             tray_menu.addAction(act_tray_file)
+            if sys.platform == "win32":
+                act_tray_clear = QAction("Clear local data…", self)
+                act_tray_clear.triggered.connect(self._on_clear_local_data)
+                tray_menu.addAction(act_tray_clear)
             act_quit = QAction("Quit", self)
             act_quit.triggered.connect(self._quit_from_tray)
             tray_menu.addAction(act_quit)
@@ -604,6 +617,58 @@ class MainWindow(QMainWindow):
         self._options_win.show()
         self._options_win.raise_()
         self._options_win.activateWindow()
+
+    @Slot()
+    def _on_clear_local_data(self) -> None:
+        if sys.platform != "win32":
+            return
+        script = clear_data_script_path()
+        if not script.is_file():
+            QMessageBox.warning(
+                self,
+                "Clear local data",
+                f"Cleanup script not found:\n{script}\n\n"
+                "From source, run scripts\\Clear-PotatoSTTData.ps1 from the repository root.",
+            )
+            return
+        tip = (
+            "This removes the Parakeet install folder, Hugging Face ONNX model downloads, saved options "
+            "(push-to-talk keys, etc.), and Windows startup Run entries for Potato STT / Pipit Clone.\n\n"
+            "Quit Potato STT first; the script will try to stop PotatoSTT.exe if it is still running."
+        )
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("Clear local data")
+        box.setText(tip)
+        box.setInformativeText(f"Script path:\n{script}")
+        btn_open = box.addButton("Open folder", QMessageBox.ButtonRole.ActionRole)
+        btn_run = box.addButton("Run in PowerShell", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked == btn_open:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(script.parent.resolve())))
+        elif clicked == btn_run:
+            flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            try:
+                subprocess.Popen(
+                    [
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        str(script),
+                    ],
+                    cwd=str(script.parent.resolve()),
+                    creationflags=flags,
+                )
+            except OSError as e:
+                QMessageBox.critical(
+                    self,
+                    "Clear local data",
+                    f"Could not start PowerShell:\n{e}",
+                )
 
     @Slot(str)
     def _append_transcript(self, text: str) -> None:

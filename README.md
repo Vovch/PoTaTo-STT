@@ -44,6 +44,14 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+**Development (tests + pre-commit hook):** from the project folder, run once per clone:
+
+```powershell
+.\scripts\bootstrap_dev.ps1
+```
+
+That creates or reuses `.venv`, installs `requirements.txt` and `requirements-dev.txt`, and installs a Git `pre-commit` hook that runs `pytest` before each commit. See `AGENTS.md` for details.
+
 ## Configure STT endpoint
 
 Environment variables (optional). Names use the **`POTATO_STT_`** prefix; the app still accepts legacy **`PIPIT_`** names where noted for older setups.
@@ -109,11 +117,27 @@ python -m venv .venv
 pip install -r requirements.txt -r requirements-build.txt
 python -m PyInstaller potato_stt.spec --clean --noconfirm
 Copy-Item -Force PotatoSTTCPU.bat dist\PotatoSTT\PotatoSTTCPU.bat
+Copy-Item -Force scripts\Clear-PotatoSTTData.ps1 dist\PotatoSTT\Clear-PotatoSTTData.ps1
 ```
 
-The build script copies **`PotatoSTTCPU.bat`** into `dist\PotatoSTT\` next to `PotatoSTT.exe` (PyInstaller alone puts bundled data under `_internal`, so the batch file is copied separately). Use it to start the app with **`POTATO_STT_CPU_ONLY=1`** (ONNX on CPU only). The same `PotatoSTTCPU.bat` in the repo root can launch from source: it runs `PotatoSTT.exe` when present, otherwise `.venv\python` or `python -m potato_stt`.
+The build script copies **`PotatoSTTCPU.bat`** and **`scripts\Clear-PotatoSTTData.ps1`** into `dist\PotatoSTT\` next to `PotatoSTT.exe` (PyInstaller alone puts bundled data under `_internal`, so these files are copied separately). Use **`PotatoSTTCPU.bat`** to start the app with **`POTATO_STT_CPU_ONLY=1`** (ONNX on CPU only). The same `PotatoSTTCPU.bat` in the repo root can launch from source: it runs `PotatoSTT.exe` when present, otherwise `.venv\python` or `python -m potato_stt`.
 
 Use a **dedicated virtual environment** that only contains this app’s dependencies. If unrelated packages (for example large ML stacks) are installed in the same environment, PyInstaller may bundle them and the output will be much larger. If `venv` recreation fails with “access denied” on `.venv\Scripts\python.exe`, close other tools that use that interpreter (editor language servers, running instances of the app), then run the script again.
+
+## Clear local data (uninstall caches)
+
+This removes **per-user** data only (not the `PotatoSTT` program folder or Python):
+
+- Parakeet bundle under `%LOCALAPPDATA%\potato_stt` and legacy `%LOCALAPPDATA%\pipit_clone`
+- Default **onnx-asr** Hugging Face downloads (`models--istupakov--parakeet-*` under your Hub cache)
+- Saved options in the registry (`PotatoSTT` / `PipitClone` Qt keys) and **Run at startup** entries (`PotatoSTT`, `PipitClone`)
+- Leftover `%TEMP%\potato-stt-*` folders
+
+**In the app:** **Help → Clear local data (uninstall caches)…** (Windows) opens the script’s folder or runs it in a new PowerShell window. Quit the app first.
+
+**Command line:** from the repo root, `.\scripts\Clear-PotatoSTTData.ps1` (interactive confirm), or `.\scripts\Clear-PotatoSTTData.ps1 -Yes` / `-WhatIf`. Next to a built `PotatoSTT.exe`, use `.\Clear-PotatoSTTData.ps1`.
+
+Optional **`-AllHuggingfaceHub`** deletes the **entire** Hugging Face hub cache for your user (affects every tool that uses it, not only Potato STT).
 
 ## Test (manual)
 

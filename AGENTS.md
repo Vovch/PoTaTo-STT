@@ -57,10 +57,21 @@ Trivial edits (comments only, typo in markdown with no build impact, etc.) do no
 - **OS:** Windows is the primary target for the desktop app.
 - **Python:** Use a virtual environment at the repo root.
 
+**Bootstrap (venv + `requirements.txt` + `requirements-dev.txt` + Git pre-commit hook):** from the repo root, run once per clone:
+
+```powershell
+Set-Location <repo-root>
+.\scripts\bootstrap_dev.ps1
+```
+
+Manual equivalent:
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
+.\scripts\install_git_hooks.ps1
 ```
 
 Optional extras: `requirements-build.txt` (see `build_windows_exe.ps1`).
@@ -86,6 +97,19 @@ Optional **pytest** (after `pip install -r requirements-dev.txt`):
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -v
 ```
+
+This includes **`tests/test_ui_e2e.py`**: Qt **MainWindow** flows with **mocked** transcription (no ONNX download, no Parakeet, no global hotkeys). Uses offscreen Qt (`QT_QPA_PLATFORM` set in `tests/conftest.py`) so it can run without a visible display.
+
+The stdlib runner **`tests/run_tests.py`** skips `test_ui_e2e.py` (it requires pytest + pytest-qt).
+
+**Git pre-commit:** `.\scripts\bootstrap_dev.ps1` installs the hook automatically. Otherwise, after dev deps are in `.venv`:
+
+```powershell
+Set-Location <repo-root>
+.\scripts\install_git_hooks.ps1
+```
+
+Or: `python scripts/run_commit_tests.py --install-hook` (any Python 3 with stdlib only). The hook is a small shell script that invokes `scripts/run_commit_tests.py`; uninstall by deleting `.git/hooks/pre-commit`. Each `git commit` runs `pytest tests -q --tb=short` via the venv.
 
 Tests build small synthetic WAVs in a temp directory. Optional **local media** checks run when you add audio/video under **`test_file/`** (see `tests/helpers.py`); if the folder is empty or missing, those cases are skipped.
 

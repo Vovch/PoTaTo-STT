@@ -28,6 +28,14 @@ $CpuBatDst = Join-Path $DistOut "PotatoSTTCPU.bat"
 if (Test-Path $DistOut) {
     Copy-Item -Path $CpuBatSrc -Destination $CpuBatDst -Force
     Write-Host "Copied PotatoSTTCPU.bat next to PotatoSTT.exe." -ForegroundColor Cyan
+    $ClearScriptSrc = Join-Path $Root "scripts\Clear-PotatoSTTData.ps1"
+    $ClearScriptDst = Join-Path $DistOut "Clear-PotatoSTTData.ps1"
+    if (Test-Path $ClearScriptSrc) {
+        Copy-Item -Path $ClearScriptSrc -Destination $ClearScriptDst -Force
+        Write-Host "Copied Clear-PotatoSTTData.ps1 next to PotatoSTT.exe." -ForegroundColor Cyan
+    } else {
+        Write-Warning "scripts\Clear-PotatoSTTData.ps1 not found - skipping copy."
+    }
 } else {
     Write-Warning "dist\PotatoSTT not found - skipping PotatoSTTCPU.bat copy."
 }
