@@ -1,4 +1,4 @@
-# Build a Windows one-folder executable bundle (dist/PipitClone/).
+# Build a Windows one-folder executable bundle (dist/PotatoSTT/).
 # Uses a dedicated .venv under the repo so PyInstaller does not bundle unrelated
 # packages from your global Python install.
 #
@@ -20,19 +20,19 @@ Write-Host "Installing dependencies into .venv ..." -ForegroundColor Cyan
 & $VenvPython -m pip install -r "$Root\requirements.txt" -r "$Root\requirements-build.txt"
 
 Write-Host "Running PyInstaller ..." -ForegroundColor Cyan
-& $VenvPython -m PyInstaller "$Root\pipit_clone.spec" --clean --noconfirm
+& $VenvPython -m PyInstaller "$Root\potato_stt.spec" --clean --noconfirm
 
-$DistOut = Join-Path $Root "dist\PipitClone"
-$CpuBatSrc = Join-Path $Root "PipitCloneCPU.bat"
-$CpuBatDst = Join-Path $DistOut "PipitCloneCPU.bat"
+$DistOut = Join-Path $Root "dist\PotatoSTT"
+$CpuBatSrc = Join-Path $Root "PotatoSTTCPU.bat"
+$CpuBatDst = Join-Path $DistOut "PotatoSTTCPU.bat"
 if (Test-Path $DistOut) {
     Copy-Item -Path $CpuBatSrc -Destination $CpuBatDst -Force
-    Write-Host "Copied PipitCloneCPU.bat next to PipitClone.exe." -ForegroundColor Cyan
+    Write-Host "Copied PotatoSTTCPU.bat next to PotatoSTT.exe." -ForegroundColor Cyan
 } else {
-    Write-Warning "dist\PipitClone not found - skipping PipitCloneCPU.bat copy."
+    Write-Warning "dist\PotatoSTT not found - skipping PotatoSTTCPU.bat copy."
 }
 
 Write-Host ""
-Write-Host "Done. Run: $($Root)\dist\PipitClone\PipitClone.exe" -ForegroundColor Green
-Write-Host "CPU-only: $($Root)\dist\PipitClone\PipitCloneCPU.bat (sets PIPIT_CPU_ONLY=1)" -ForegroundColor Green
-Write-Host 'Ship the entire dist\PipitClone folder (DLLs live next to PipitClone.exe).' -ForegroundColor Yellow
+Write-Host "Done. Run: $($Root)\dist\PotatoSTT\PotatoSTT.exe" -ForegroundColor Green
+Write-Host "CPU-only: $($Root)\dist\PotatoSTT\PotatoSTTCPU.bat (sets POTATO_STT_CPU_ONLY=1)" -ForegroundColor Green
+Write-Host 'Ship the entire dist\PotatoSTT folder (DLLs live next to PotatoSTT.exe).' -ForegroundColor Yellow

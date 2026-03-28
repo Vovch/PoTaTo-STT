@@ -22,12 +22,12 @@ def _patch_source_app(source_dir: Path) -> None:
     if not app_py.exists():
         return
     text = app_py.read_text(encoding="utf-8", errors="ignore")
-    if "PIPIT_DISABLE_PARAKEET_WEBOPEN" in text:
+    if "POTATO_STT_DISABLE_PARAKEET_WEBOPEN" in text or "PIPIT_DISABLE_PARAKEET_WEBOPEN" in text:
         patched = text
     else:
         patched = text.replace(
             "threading.Thread(target=openweb).start()",
-            "if os.environ.get('PIPIT_DISABLE_PARAKEET_WEBOPEN', '1') != '1':\n"
+            "if os.environ.get('POTATO_STT_DISABLE_PARAKEET_WEBOPEN', '1') != '1':\n"
             "        threading.Thread(target=openweb).start()",
         )
 
@@ -152,14 +152,19 @@ def _download_with_progress(
 
 
 def _launch_bat(install_path: Path) -> None:
-    log_path = install_path / "pipit-parakeet.log"
+    log_path = install_path / "potato-stt-parakeet.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["POTATO_STT_DISABLE_PARAKEET_WEBOPEN"] = "1"
+    # Legacy: older patched app.py checked PIPIT_DISABLE_PARAKEET_WEBOPEN.
+    env["PIPIT_DISABLE_PARAKEET_WEBOPEN"] = "1"
     with log_path.open("a", encoding="utf-8") as logf:
         subprocess.Popen(
             ["cmd", "/c", "启动.bat"],
             cwd=str(install_path),
             stdout=logf,
             stderr=logf,
+            env=env,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
 
@@ -220,7 +225,7 @@ def _fallback_run_source(
     app_py = source_dir / "app.py"
     if not app_py.exists():
         install_path.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="pipit-parakeet-src-") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="potato-stt-parakeet-src-") as tmpdir:
             zip_path = Path(tmpdir) / "parakeet-api.zip"
             source_zip_url = "https://codeload.github.com/jianchang512/parakeet-api/zip/refs/heads/main"
             on_status("Package URL failed, downloading parakeet-api source fallback...")
@@ -276,10 +281,11 @@ def _fallback_run_source(
         on_status(f"Fallback dependency install failed with exit code {install_proc.returncode}.")
         return False
 
-    log_path = source_dir / "pipit-parakeet-fallback.log"
+    log_path = source_dir / "potato-stt-parakeet-fallback.log"
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    env["POTATO_STT_DISABLE_PARAKEET_WEBOPEN"] = "1"
     env["PIPIT_DISABLE_PARAKEET_WEBOPEN"] = "1"
     with log_path.open("a", encoding="utf-8") as logf:
         proc = subprocess.Popen(
@@ -331,7 +337,7 @@ def ensure_parakeet_service(
         try:
             on_status("Downloading Parakeet Windows package (first run may be large)...")
             install_path.mkdir(parents=True, exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix="pipit-parakeet-") as tmpdir:
+            with tempfile.TemporaryDirectory(prefix="potato-stt-parakeet-") as tmpdir:
                 archive_path = Path(tmpdir) / "parakeet-win.7z"
 
                 def _progress(p: float) -> None:
@@ -369,7 +375,7 @@ def ensure_parakeet_service(
             port=api_port,
             timeout_seconds=launch_timeout_seconds,
             on_status=on_status,
-            log_path=install_path / "pipit-parakeet.log",
+            log_path=install_path / "potato-stt-parakeet.log",
         ):
             on_status("Parakeet STT is ready.")
             return
@@ -389,7 +395,7 @@ def ensure_parakeet_service(
 
     raise TimeoutError(
         f"Failed to start Parakeet STT. Expected {api_base_url} on port {api_port}. "
-        f"If the package URL changed, set PIPIT_PARKEET_WIN_URL or set "
-        f"PIPIT_PARKEET_INSTALL_DIR to an already extracted folder containing 启动.bat."
+        f"If the package URL changed, set POTATO_STT_PARAKEET_WIN_URL (or legacy PIPIT_PARKEET_WIN_URL) or set "
+        f"POTATO_STT_PARAKEET_INSTALL_DIR to an already extracted folder containing 启动.bat."
     )
 

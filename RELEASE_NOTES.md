@@ -1,5 +1,13 @@
 # Release notes
 
+## Product rename — Potato STT (2026)
+
+- **Display name:** Potato STT (formerly “Pipit Clone”).
+- **Python package:** `potato_stt` (`python -m potato_stt`).
+- **Windows build:** `dist\PotatoSTT\PotatoSTT.exe`, launcher `PotatoSTTCPU.bat`.
+- **Environment variables:** prefer `POTATO_STT_*`; legacy `PIPIT_*` is still read by `config.py` where documented in README.
+- **QSettings / registry Run:** org key `PotatoSTT`; you may need to re-open **Options** and re-enable “Launch at startup” after upgrading.
+
 ## v1.2 — 2026-03-25
 
 ### Push-to-talk

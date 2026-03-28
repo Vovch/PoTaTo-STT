@@ -1,3 +1,6 @@
+# Local large media for manual tests (optional)
+test_file/
+
 .venv/
 build/
 dist/

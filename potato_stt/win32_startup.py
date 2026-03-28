@@ -7,7 +7,7 @@ import os
 import sys
 
 _REG_SUBKEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-_VALUE_NAME = "PipitClone"
+_VALUE_NAME = "PotatoSTT"
 
 
 def build_launch_command() -> str:
@@ -20,7 +20,7 @@ def build_launch_command() -> str:
         pythonw = os.path.join(bindir, "pythonw.exe")
         if os.path.isfile(pythonw):
             exe = pythonw
-    return f'"{exe}" -m pipit_clone'
+    return f'"{exe}" -m potato_stt'
 
 
 def is_run_at_startup_enabled() -> bool:

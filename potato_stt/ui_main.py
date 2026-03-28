@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -14,7 +15,6 @@ from PySide6.QtCore import QEvent, QObject, QRectF, QSettings, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
-    QEnterEvent,
     QFont,
     QIcon,
     QPainter,
@@ -24,11 +24,11 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import (
-    QAbstractButton,
     QApplication,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -39,28 +39,32 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QStyle,
     QSystemTrayIcon,
     QTextEdit,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
 from pynput import keyboard, mouse
 
-from pipit_clone.audio_utils import float_to_int16_pcm, write_wav_from_int16_pcm
-from pipit_clone.config import Settings
-from pipit_clone.onnx_asr_engine import OnnxAsrEngine
-from pipit_clone.parakeet_windows_installer import ensure_parakeet_service
-from pipit_clone.stt_client import transcribe_wav
-from pipit_clone.transcript_utils import finalize_sentence_for_clipboard, normalize_phrase_spacing
-from pipit_clone.win32_paste import (
+from potato_stt.audio_utils import float_to_int16_pcm, write_wav_from_int16_pcm
+from potato_stt.config import Settings
+from potato_stt.file_transcribe import transcribe_file_to_text_and_cues
+from potato_stt.onnx_asr_engine import OnnxAsrEngine
+from potato_stt.parakeet_windows_installer import ensure_parakeet_service
+from potato_stt.stt_client import transcribe_wav
+from potato_stt.subtitle_export import cues_to_srt, cues_to_vtt
+from potato_stt.transcript_utils import finalize_sentence_for_clipboard, normalize_phrase_spacing
+from potato_stt.win32_paste import (
     get_foreground_hwnd,
     is_window,
     send_ctrl_v_keybd_event,
     set_foreground_hwnd,
     set_windows_app_user_model_id,
 )
-from pipit_clone.ptt_capture import capture_ptt_binding
-from pipit_clone.ptt_keys import (
+from potato_stt.ptt_capture import capture_ptt_binding
+from potato_stt.ptt_keys import (
     DEFAULT_PTT_SPECS,
     event_matches_any_spec_keyboard,
     event_matches_any_spec_mouse,
@@ -73,7 +77,7 @@ from pipit_clone.ptt_keys import (
     spec_label,
     specs_summary_phrase,
 )
-from pipit_clone.win32_startup import (
+from potato_stt.win32_startup import (
     is_run_at_startup_enabled,
     set_run_at_startup_enabled,
 )
@@ -100,7 +104,7 @@ def build_app_icon() -> QIcon:
         font.setPixelSize(max(8, int(size * 0.45)))
         font.setBold(True)
         p.setFont(font)
-        p.drawText(pm.rect(), int(Qt.AlignCenter), "P")
+        p.drawText(pm.rect(), int(Qt.AlignCenter), "T")
         p.end()
         return pm
 
@@ -144,57 +148,6 @@ def build_gear_icon(color: QColor, pixel_size: int = 20) -> QIcon:
     icon = QIcon()
     icon.addPixmap(pm)
     return icon
-
-
-class GearIconButton(QAbstractButton):
-    """Square button that paints the icon truly centered (avoids QToolButton style icon offset)."""
-
-    _side = 32
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._px = 20
-        self._icon = QIcon()
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setFixedSize(self._side, self._side)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-
-    def setIcon(self, icon: QIcon) -> None:
-        self._icon = icon
-        self.update()
-
-    def sizeHint(self) -> QSize:
-        return QSize(self._side, self._side)
-
-    def enterEvent(self, event: QEnterEvent) -> None:
-        super().enterEvent(event)
-        self.update()
-
-    def leaveEvent(self, event: QEvent) -> None:
-        super().leaveEvent(event)
-        self.update()
-
-    def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        r = self.rect()
-        bg = self.palette().color(QPalette.ColorRole.Window)
-        if self.underMouse():
-            bg = self.palette().color(QPalette.ColorRole.AlternateBase)
-        p.fillRect(r, bg)
-        border = QColor("#c0c0c0")
-        if self.underMouse():
-            border = QColor("#909090")
-        p.setPen(QPen(border))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
-        if not self._icon.isNull():
-            pm = self._icon.pixmap(self._px, self._px)
-            x = (self.width() - pm.width()) // 2
-            y = (self.height() - pm.height()) // 2
-            p.drawPixmap(x, y, pm)
-        p.end()
 
 
 class _CaptureNotifier(QObject):
@@ -266,14 +219,14 @@ class OptionsWindow(QWidget):
     def __init__(self, main_window: QWidget, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._main = main_window
-        self._settings = QSettings("PipitClone", "PipitClone")
+        self._settings = QSettings("PotatoSTT", "PotatoSTT")
         self.setWindowTitle("Options")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint)
         self.setMinimumWidth(420)
 
         layout = QVBoxLayout(self)
         if sys.platform == "win32":
-            self._startup_cb = QCheckBox("Launch Pipit Clone at Windows startup")
+            self._startup_cb = QCheckBox("Launch Potato STT at Windows startup")
             self._startup_cb.setChecked(is_run_at_startup_enabled())
             self._startup_cb.toggled.connect(self._on_startup_toggled)
             layout.addWidget(self._startup_cb)
@@ -393,6 +346,7 @@ class AppSignals(QObject):
     transcriptReady = Signal(str)
     errorOccurred = Signal(str)
     recordingActive = Signal(bool)
+    fileTranscribeDone = Signal(str, str, str, str)
 
 
 class RecordingOverlay(QWidget):
@@ -428,14 +382,14 @@ class RecordingOverlay(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, app_icon: Optional[QIcon] = None) -> None:
         super().__init__()
-        self.setWindowTitle("Pipit Clone (Parakeet TDT STT) — Push-to-talk")
+        self.setWindowTitle("Potato STT — Push-to-talk")
         self.setMinimumWidth(820)
 
         self._app_icon = app_icon if app_icon is not None else build_app_icon()
         self.setWindowIcon(self._app_icon)
 
         self.settings = Settings()
-        self._qsettings = QSettings("PipitClone", "PipitClone")
+        self._qsettings = QSettings("PotatoSTT", "PotatoSTT")
         self._ptt_specs: list[str] = load_ptt_specs(self._qsettings)
         self._stt_engine_ready = False
 
@@ -456,20 +410,8 @@ class MainWindow(QMainWindow):
 
         self._options_win: Optional[OptionsWindow] = None
 
-        _header = QHBoxLayout()
-        self._options_btn = GearIconButton()
-        self._options_btn.setToolTip("Options")
-        _gear_px = 20
-        self._options_btn.setIcon(
-            build_gear_icon(self.palette().color(QPalette.ColorRole.WindowText), pixel_size=_gear_px)
-        )
-        self._options_btn.clicked.connect(self._open_options)
-        _header.addWidget(self._options_btn)
-        _header.addStretch(1)
-
         root = QWidget()
         layout = QVBoxLayout()
-        layout.addLayout(_header)
         layout.addWidget(self._help_label)
         layout.addWidget(self._status_label)
         layout.addWidget(self._progress)
@@ -479,12 +421,54 @@ class MainWindow(QMainWindow):
         root.setLayout(layout)
         self.setCentralWidget(root)
 
+        _file_menu = self.menuBar().addMenu("&File")
+        act_transcribe_file = QAction("Transcribe media file…", self)
+        act_transcribe_file.triggered.connect(self._on_transcribe_file_chosen)
+        _file_menu.addAction(act_transcribe_file)
+        _file_menu.addSeparator()
+        act_quit_menu = QAction("&Quit", self)
+        act_quit_menu.setShortcut("Ctrl+Q")
+        act_quit_menu.triggered.connect(self.close)
+        _file_menu.addAction(act_quit_menu)
+
+        _settings_menu = self.menuBar().addMenu("&Settings")
+        act_options_menu = QAction("&Options…", self)
+        act_options_menu.setShortcut("Ctrl+,")
+        act_options_menu.triggered.connect(self._open_options)
+        _settings_menu.addAction(act_options_menu)
+
+        _toolbar = QToolBar("Main")
+        _toolbar.setMovable(False)
+        _toolbar.setFloatable(False)
+        _toolbar.setIconSize(QSize(22, 22))
+        _toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.addToolBar(_toolbar)
+
+        act_tb_transcribe = QAction("Transcribe file", self)
+        act_tb_transcribe.setToolTip("Open an audio or video file to transcribe")
+        _sty = self.style()
+        if _sty is not None:
+            act_tb_transcribe.setIcon(
+                _sty.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)
+            )
+        act_tb_transcribe.triggered.connect(self._on_transcribe_file_chosen)
+        _toolbar.addAction(act_tb_transcribe)
+
+        act_tb_options = QAction("Options", self)
+        act_tb_options.setToolTip("Open settings (push-to-talk, startup, …)")
+        act_tb_options.setIcon(
+            build_gear_icon(self.palette().color(QPalette.ColorRole.WindowText), pixel_size=20)
+        )
+        act_tb_options.triggered.connect(self._open_options)
+        _toolbar.addAction(act_tb_options)
+
         self.signals = AppSignals()
         self.signals.statusChanged.connect(self._on_status_update)
         self.signals.transcriptAppend.connect(self._append_transcript)
         self.signals.transcriptReady.connect(self._paste_transcript_to_active_app)
         self.signals.errorOccurred.connect(self._on_error)
         self.signals.recordingActive.connect(self._on_recording_overlay)
+        self.signals.fileTranscribeDone.connect(self._on_file_transcribe_done)
 
         self._recording_overlay = RecordingOverlay()
         self._recording_overlay.hide()
@@ -509,11 +493,14 @@ class MainWindow(QMainWindow):
         if QSystemTrayIcon.isSystemTrayAvailable():
             tray = QSystemTrayIcon(self)
             tray.setIcon(self._app_icon)
-            tray.setToolTip(f"Pipit Clone — hold {specs_summary_phrase(self._ptt_specs)} to talk")
+            tray.setToolTip(f"Potato STT — hold {specs_summary_phrase(self._ptt_specs)} to talk")
             tray_menu = QMenu()
             act_show = QAction("Show", self)
             act_show.triggered.connect(self._show_from_tray)
             tray_menu.addAction(act_show)
+            act_tray_file = QAction("Transcribe media file…", self)
+            act_tray_file.triggered.connect(self._on_transcribe_file_chosen)
+            tray_menu.addAction(act_tray_file)
             act_quit = QAction("Quit", self)
             act_quit.triggered.connect(self._quit_from_tray)
             tray_menu.addAction(act_quit)
@@ -594,7 +581,7 @@ class MainWindow(QMainWindow):
                 " Minimize the window to send it to the system tray "
                 "(double-click the tray icon to restore)."
             )
-            self._tray_icon.setToolTip(f"Pipit Clone — hold {ptt} to talk")
+            self._tray_icon.setToolTip(f"Potato STT — hold {ptt} to talk")
         self._help_label.setText(text)
 
     @Slot()
@@ -627,6 +614,103 @@ class MainWindow(QMainWindow):
         else:
             self._transcript.setPlainText(current + "\n" + line + "\n")
         self._transcript.ensureCursorVisible()
+
+    @Slot()
+    def _on_transcribe_file_chosen(self) -> None:
+        if not self._stt_engine_ready:
+            QMessageBox.information(
+                self,
+                "Transcribe file",
+                "The speech engine is still getting ready. Wait until startup finishes, then try again.",
+            )
+            return
+        if self._transcribing:
+            QMessageBox.information(
+                self,
+                "Transcribe file",
+                "A transcription is already in progress.",
+            )
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open audio or video",
+            "",
+            "Media (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma *.mp4 *.mkv *.webm *.mov *.avi);;"
+            "All files (*.*)",
+        )
+        if not path:
+            return
+        self._start_file_transcribe(Path(path))
+
+    def _start_file_transcribe(self, source_path: Path) -> None:
+        if self._transcribing:
+            return
+        self._transcribing = True
+        self.signals.statusChanged.emit(f"Transcribing file: {source_path.name} …")
+        src_str = str(source_path.resolve())
+        ptt_specs_snapshot = list(self._ptt_specs)
+
+        def job() -> None:
+            try:
+                t0 = time.time()
+
+                def _progress(part: str) -> None:
+                    self.signals.statusChanged.emit(
+                        f"Transcribing file: {source_path.name} — {part} …"
+                    )
+
+                cleaned, cues = transcribe_file_to_text_and_cues(
+                    source_path,
+                    chunk_seconds=self.settings.transcribe_chunk_seconds,
+                    stt_backend=self.settings.stt_backend,
+                    onnx_engine=self._onnx_engine,
+                    stt_api_url=self.settings.stt_api_url,
+                    stt_model=self.settings.stt_model,
+                    stt_response_format=self.settings.stt_response_format,
+                    stt_timeout_seconds=self.settings.stt_timeout_seconds,
+                    on_progress=_progress,
+                )
+                took = time.time() - t0
+                srt_body = cues_to_srt(cues) if cues else ""
+                vtt_body = cues_to_vtt(cues) if cues else ""
+                self.signals.fileTranscribeDone.emit(src_str, cleaned, srt_body, vtt_body)
+                self.signals.statusChanged.emit(
+                    f"File transcribed in {took:.1f}s. Transcript added (not pasted). Ready. Hold "
+                    f"{specs_summary_phrase(ptt_specs_snapshot)} to talk."
+                )
+            except Exception as e:
+                self.signals.errorOccurred.emit(f"{type(e).__name__}: {e}")
+                self.signals.statusChanged.emit(
+                    f"Ready. Hold {specs_summary_phrase(ptt_specs_snapshot)} to talk."
+                )
+            finally:
+                self._transcribing = False
+
+        threading.Thread(target=job, daemon=True).start()
+
+    @Slot(str, str, str, str)
+    def _on_file_transcribe_done(self, source_path: str, transcript: str, srt_body: str, vtt_body: str) -> None:
+        t = transcript.strip()
+        if t:
+            self.signals.transcriptAppend.emit(t)
+        if not (srt_body.strip() or vtt_body.strip()):
+            return
+        default_path = str(Path(source_path).with_suffix(".srt"))
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save subtitles",
+            default_path,
+            "SubRip (*.srt);;WebVTT (*.vtt)",
+        )
+        if not path:
+            return
+        p = Path(path)
+        if p.suffix.lower() == ".vtt":
+            p.write_text(vtt_body, encoding="utf-8", newline="\n")
+        else:
+            if p.suffix.lower() != ".srt":
+                p = p.with_suffix(".srt")
+            p.write_text(srt_body, encoding="utf-8", newline="\n")
 
     def _position_recording_overlay(self) -> None:
         screen = QApplication.primaryScreen()
@@ -714,7 +798,9 @@ class MainWindow(QMainWindow):
             self._progress.setRange(0, 0)
             self._progress.setFormat("Preparing ONNX model...")
             return
-        if "ready." in lower:
+        # PTT completion uses "Ready."; file transcription used to omit it and hit the
+        # generic "Working..." branch (indeterminate bar looks like endless loading).
+        if "ready." in lower or "file transcribed" in lower:
             self._progress.setRange(0, 1)
             self._progress.setValue(1)
             self._progress.setFormat("Ready")
@@ -741,7 +827,7 @@ class MainWindow(QMainWindow):
         time.sleep(0.02)
 
         try:
-            # Put focus back on the app that was active when recording started (not Pipit).
+            # Put focus back on the app that was active when recording started (not this window).
             our_hwnd = int(self.winId()) if self.winId() else 0
             target = self._paste_target_hwnd
             if target and target != our_hwnd and is_window(target):
@@ -942,7 +1028,7 @@ class MainWindow(QMainWindow):
 
         def _job(pcm_data: np.ndarray) -> None:
             try:
-                with tempfile.TemporaryDirectory(prefix="pipit-audio-") as tmpdir:
+                with tempfile.TemporaryDirectory(prefix="potato-stt-audio-") as tmpdir:
                     wav_path = os.path.join(tmpdir, f"talk_{int(time.time()*1000)}.wav")
                     write_wav_from_int16_pcm(pcm_data, wav_path, sample_rate=self._sample_rate)
 

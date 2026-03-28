@@ -7,7 +7,7 @@ from typing import Optional
 
 from pynput import keyboard, mouse
 
-from pipit_clone.ptt_keys import keyboard_event_to_capture_spec, mouse_button_to_spec
+from potato_stt.ptt_keys import keyboard_event_to_capture_spec, mouse_button_to_spec
 
 
 def capture_ptt_binding(

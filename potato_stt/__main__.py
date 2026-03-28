@@ -1,4 +1,4 @@
-"""Entry point for `python -m pipit_clone` and PyInstaller (console=False)."""
+"""Entry point for `python -m potato_stt` and PyInstaller (console=False)."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def _ensure_stdio_streams() -> None:
 
 _ensure_stdio_streams()
 
-from pipit_clone.ui_main import main  # noqa: E402
+from potato_stt.ui_main import main  # noqa: E402
 
 
 if __name__ == "__main__":

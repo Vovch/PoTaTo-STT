@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for Pipit Clone (Windows GUI).
+PyInstaller spec for Potato STT (Windows GUI).
 
 Build from the repository root (prefer the project venv — see build_windows_exe.ps1):
-  python -m PyInstaller pipit_clone.spec --clean --noconfirm
+  python -m PyInstaller potato_stt.spec --clean --noconfirm
 
-Output: dist/PipitClone/PipitClone.exe (one-folder bundle; recommended for ONNX/Qt/DirectML).
+Output: dist/PotatoSTT/PotatoSTT.exe (one-folder bundle; recommended for ONNX/Qt/DirectML).
 
 Do not use collect_all(PySide6): it pulls every Qt module (3D, QML, …) and makes the build huge.
 """
@@ -20,14 +20,17 @@ spec_root = os.path.dirname(os.path.abspath(SPEC))
 datas: list = []
 binaries: list = []
 hiddenimports = [
-    "pipit_clone",
-    "pipit_clone.ui_main",
-    "pipit_clone.audio_utils",
-    "pipit_clone.config",
-    "pipit_clone.onnx_asr_engine",
-    "pipit_clone.parakeet_windows_installer",
-    "pipit_clone.stt_client",
-    "pipit_clone.win32_paste",
+    "potato_stt",
+    "potato_stt.ui_main",
+    "potato_stt.audio_utils",
+    "potato_stt.config",
+    "potato_stt.onnx_asr_engine",
+    "potato_stt.parakeet_windows_installer",
+    "potato_stt.stt_client",
+    "potato_stt.media_decode",
+    "potato_stt.file_transcribe",
+    "potato_stt.subtitle_export",
+    "potato_stt.win32_paste",
     "sounddevice",
     "_sounddevice_data",
     "pynput.keyboard._win32",
@@ -60,12 +63,12 @@ try:
 except Exception:
     pass
 
-# PipitCloneCPU.bat is not listed here: PyInstaller places `datas` under _internal/,
-# but the launcher must sit next to PipitClone.exe. build_windows_exe.ps1 copies it
-# into dist/PipitClone/ after the build.
+# PotatoSTTCPU.bat is not listed here: PyInstaller places `datas` under _internal/,
+# but the launcher must sit next to PotatoSTT.exe. build_windows_exe.ps1 copies it
+# into dist/PotatoSTT/ after the build.
 
 a = Analysis(
-    [os.path.join(spec_root, "pipit_clone", "__main__.py")],
+    [os.path.join(spec_root, "potato_stt", "__main__.py")],
     pathex=[spec_root],
     binaries=binaries,
     datas=datas,
@@ -87,7 +90,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="PipitClone",
+    name="PotatoSTT",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -108,5 +111,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="PipitClone",
+    name="PotatoSTT",
 )

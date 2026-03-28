@@ -54,7 +54,7 @@ def send_ctrl_v_keybd_event() -> None:
 
 
 def set_windows_app_user_model_id(
-    app_id: str = "PipitClone.PipitClone.Application.1",
+    app_id: str = "PotatoSTT.PotatoSTT.Application.1",
 ) -> None:
     """Assign a stable AppUserModelID so the taskbar shows QWidget window icons (not python.exe)."""
     if sys.platform != "win32":

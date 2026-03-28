@@ -1,15 +1,15 @@
-# Agent instructions (Pipit Clone)
+# Agent instructions (Potato STT)
 
 Minimal Windows desktop voice-to-text MVP (PySide6, configurable push-to-talk key, Parakeet / ONNX ASR). See `README.md` for user-facing setup and behavior.
 
 ## Best practices for this repository
 
 - **Scope:** Keep diffs minimal and tied to the request. Avoid drive-by refactors, unrelated file churn, and extra documentation unless the user asks for it.
-- **Consistency:** Match naming, layout, and patterns already used in `pipit_clone/`. Reuse helpers instead of duplicating logic.
+- **Consistency:** Match naming, layout, and patterns already used in `potato_stt/`. Reuse helpers instead of duplicating logic.
 - **Windows-first:** The app targets desktop Windows (audio, tray, global hotkeys, optional EXE). Consider tray, minimized startup, and focus behavior when changing the main window or options.
 - **Contracts:** Environment variables, model paths, and STT behavior belong in `README.md` when user-visible; keep code and docs aligned when those contracts change.
 - **Dependencies:** Prefer the versions pinned in `requirements.txt` / `requirements-build.txt`. If you add or upgrade a package, say so and update the appropriate requirements file.
-- **Qt / settings:** `QSettings` uses org/app `PipitClone` / `PipitClone` in several places; keep keys consistent when adding persisted UI state.
+- **Qt / settings:** `QSettings` uses org/app `PotatoSTT` / `PotatoSTT` in several places; keep keys consistent when adding persisted UI state.
 
 ## Always verify your work
 
@@ -30,25 +30,25 @@ Use the repo-root `.venv` (create it if missing: `python -m venv .venv`).
 
 ```powershell
 Set-Location <repo-root>
-.\.venv\Scripts\python.exe -c "import pipit_clone.ui_main; print('import ok')"
+.\.venv\Scripts\python.exe -c "import potato_stt.ui_main; print('import ok')"
 ```
 
 For UI, startup, or integration paths, also start the app briefly (it should not exit immediately with a traceback):
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m pipit_clone
+python -m potato_stt
 ```
 
 **When to run a full Windows EXE build**
 
 Run `.\build_windows_exe.ps1` from the repository root when your changes could affect the frozen bundle, for example:
 
-- `pipit_clone/ui_main.py` or other entry/import paths used by the packaged app
-- `pipit_clone.spec`, PyInstaller hooks, or `requirements.txt` / `requirements-build.txt`
+- `potato_stt/ui_main.py` or other entry/import paths used by the packaged app
+- `potato_stt.spec`, PyInstaller hooks, or `requirements.txt` / `requirements-build.txt`
 - Native DLL loading, resource paths, or anything that behaves differently under PyInstaller
 
-The script installs runtime + build requirements into `.venv`, runs PyInstaller, and writes `dist\PipitClone\` (ship the entire folder, not only `PipitClone.exe`). Confirm the script exits successfully; when you have an interactive desktop, optionally smoke-test `dist\PipitClone\PipitClone.exe`.
+The script installs runtime + build requirements into `.venv`, runs PyInstaller, and writes `dist\PotatoSTT\` (ship the entire folder, not only `PotatoSTT.exe`). Confirm the script exits successfully; when you have an interactive desktop, optionally smoke-test `dist\PotatoSTT\PotatoSTT.exe`.
 
 Trivial edits (comments only, typo in markdown with no build impact, etc.) do not require a full EXE build, but still run an import or relevant check when practical.
 
@@ -69,22 +69,35 @@ Optional extras: `requirements-build.txt` (see `build_windows_exe.ps1`).
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m pipit_clone
+python -m potato_stt
 ```
 
 ## Testing
 
-There is no automated test suite in this repo yet. Use the **manual** flow in `README.md` (Notepad or another app, focus the caret, hold the push-to-talk key, speak, release) when you change behavior that affects capture, STT, or paste.
+**Automated (stdlib unittest, no extra install):** from the repo root:
 
-If you add tests or CI, document the exact commands here and treat them as mandatory before merge.
+```powershell
+Set-Location <repo-root>
+.\.venv\Scripts\python.exe tests\run_tests.py
+```
+
+Optional **pytest** (after `pip install -r requirements-dev.txt`):
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -v
+```
+
+Tests build small synthetic WAVs in a temp directory. Optional **local media** checks run when you add audio/video under **`test_file/`** (see `tests/helpers.py`); if the folder is empty or missing, those cases are skipped.
+
+**Manual:** use the flow in `README.md` (Notepad or another app, focus the caret, hold push-to-talk, speak, release) when you change capture, STT, or paste behavior in ways the unit tests do not cover.
 
 ## Build / packaging (when relevant)
 
-- **Windows EXE:** `.\build_windows_exe.ps1` from repo root (requires `requirements-build.txt` / PyInstaller as in the script). Output: `dist\PipitClone\` including `PipitClone.exe` and `_internal\`. CPU-only launcher: `PipitCloneCPU.bat` in the same folder.
+- **Windows EXE:** `.\build_windows_exe.ps1` from repo root (requires `requirements-build.txt` / PyInstaller as in the script). Output: `dist\PotatoSTT\` including `PotatoSTT.exe` and `_internal\`. CPU-only launcher: `PotatoSTTCPU.bat` in the same folder.
 
 ## Code style
 
-- Keep changes **minimal and scoped** to the request; match existing patterns in `pipit_clone/`.
+- Keep changes **minimal and scoped** to the request; match existing patterns in `potato_stt/`.
 - Do not add unsolicited docs or refactors outside the task.
 - Environment variables and STT wiring are documented in `README.md`; keep code and env docs aligned when you change contracts.
 
