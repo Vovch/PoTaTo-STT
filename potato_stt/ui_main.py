@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QSizePolicy,
@@ -60,7 +61,13 @@ from potato_stt.onnx_asr_engine import OnnxAsrEngine
 from potato_stt.parakeet_windows_installer import ensure_parakeet_service
 from potato_stt.stt_client import transcribe_wav
 from potato_stt.subtitle_export import cues_to_srt, cues_to_vtt
-from potato_stt.transcript_utils import finalize_sentence_for_clipboard, normalize_phrase_spacing
+from potato_stt.transcript_utils import (
+    apply_word_filter_after_normalize,
+    filter_subtitle_cues,
+    finalize_sentence_for_clipboard,
+    parse_filter_phrases,
+    postprocess_transcript_text,
+)
 from potato_stt.win32_paste import (
     get_foreground_hwnd,
     is_window,
@@ -87,8 +94,13 @@ from potato_stt.win32_startup import (
     set_run_at_startup_enabled,
 )
 
-# QSettings key (same org/app as push-to-talk keys).
+# QSettings keys (same org/app as push-to-talk keys).
 START_MINIMIZED_SETTING = "ui/start_minimized"
+TRANSCRIPT_FILTER_ENABLED = "ui/transcript_filter_enabled"
+TRANSCRIPT_FILTER_WORDS = "ui/transcript_filter_words"
+# First-run defaults (used when keys are absent; existing QSettings win once saved).
+TRANSCRIPT_FILTER_ENABLED_DEFAULT = True
+TRANSCRIPT_FILTER_WORDS_DEFAULT = "uh\num"
 
 
 def build_app_icon() -> QIcon:
@@ -272,6 +284,42 @@ class OptionsWindow(QWidget):
         _ptt_help.setStyleSheet("color: #888888; font-size: 11px;")
         layout.addWidget(_ptt_help)
 
+        self._filter_cb = QCheckBox("Remove filler words and phrases from transcripts")
+        self._filter_cb.setChecked(
+            bool(
+                self._settings.value(
+                    TRANSCRIPT_FILTER_ENABLED,
+                    TRANSCRIPT_FILTER_ENABLED_DEFAULT,
+                    type=bool,
+                )
+            )
+        )
+        self._filter_cb.setToolTip(
+            "Case-insensitive whole-word or whole-phrase removal after normalization. "
+            "Affects push-to-talk, file transcription, and subtitle export."
+        )
+        self._filter_cb.toggled.connect(self._on_transcript_filter_enabled_toggled)
+        layout.addWidget(self._filter_cb)
+
+        layout.addWidget(QLabel("Words/phrases to strip (one per line or comma-separated):"))
+        self._filter_words = QPlainTextEdit()
+        self._filter_words.setPlaceholderText("um\nyou know")
+        self._filter_words.setMinimumHeight(80)
+        self._filter_words.setPlainText(
+            str(
+                self._settings.value(TRANSCRIPT_FILTER_WORDS, TRANSCRIPT_FILTER_WORDS_DEFAULT)
+                or ""
+            )
+        )
+        self._filter_words.textChanged.connect(self._on_transcript_filter_words_changed)
+        layout.addWidget(self._filter_words)
+        _filter_help = QLabel(
+            "Lines starting with # are ignored. Longer phrases are removed before shorter ones."
+        )
+        _filter_help.setWordWrap(True)
+        _filter_help.setStyleSheet("color: #888888; font-size: 11px;")
+        layout.addWidget(_filter_help)
+
         layout.addStretch(1)
         self._populate_ptt_list()
 
@@ -343,6 +391,14 @@ class OptionsWindow(QWidget):
     @Slot(bool)
     def _on_start_minimized_toggled(self, checked: bool) -> None:
         self._settings.setValue(START_MINIMIZED_SETTING, bool(checked))
+
+    @Slot(bool)
+    def _on_transcript_filter_enabled_toggled(self, checked: bool) -> None:
+        self._settings.setValue(TRANSCRIPT_FILTER_ENABLED, bool(checked))
+
+    @Slot()
+    def _on_transcript_filter_words_changed(self) -> None:
+        self._settings.setValue(TRANSCRIPT_FILTER_WORDS, self._filter_words.toPlainText())
 
 
 class AppSignals(QObject):
@@ -692,6 +748,22 @@ class MainWindow(QMainWindow):
                     f"Could not start PowerShell:\n{e}",
                 )
 
+    def _effective_filter_phrases(self) -> list[str] | None:
+        """Phrases to strip from transcripts when the Options toggle is on; main thread only."""
+        if not bool(
+            self._qsettings.value(
+                TRANSCRIPT_FILTER_ENABLED,
+                TRANSCRIPT_FILTER_ENABLED_DEFAULT,
+                type=bool,
+            )
+        ):
+            return None
+        raw = str(
+            self._qsettings.value(TRANSCRIPT_FILTER_WORDS, TRANSCRIPT_FILTER_WORDS_DEFAULT) or ""
+        )
+        phrases = parse_filter_phrases(raw)
+        return phrases if phrases else None
+
     @Slot(str)
     def _append_transcript(self, text: str) -> None:
         current = self._transcript.toPlainText().strip()
@@ -736,6 +808,7 @@ class MainWindow(QMainWindow):
         self.signals.statusChanged.emit(f"Transcribing file: {source_path.name} …")
         src_str = str(source_path.resolve())
         ptt_specs_snapshot = list(self._ptt_specs)
+        filter_phrases = self._effective_filter_phrases()
 
         def job() -> None:
             try:
@@ -757,6 +830,10 @@ class MainWindow(QMainWindow):
                     stt_timeout_seconds=self.settings.stt_timeout_seconds,
                     on_progress=_progress,
                 )
+                fp = filter_phrases
+                if fp:
+                    cleaned = apply_word_filter_after_normalize(cleaned, fp)
+                    cues = filter_subtitle_cues(list(cues), fp)
                 took = time.time() - t0
                 srt_body = cues_to_srt(cues) if cues else ""
                 vtt_body = cues_to_vtt(cues) if cues else ""
@@ -1139,6 +1216,7 @@ class MainWindow(QMainWindow):
 
         self._transcribing = True
         self.signals.statusChanged.emit("Transcribing...")
+        filter_phrases = self._effective_filter_phrases()
 
         def _job(pcm_data: np.ndarray) -> None:
             try:
@@ -1160,7 +1238,7 @@ class MainWindow(QMainWindow):
                             timeout_seconds=self.settings.stt_timeout_seconds,
                         )
                     took = time.time() - t0
-                    cleaned = normalize_phrase_spacing(text)
+                    cleaned = postprocess_transcript_text(text, filter_phrases=filter_phrases)
                     if cleaned:
                         self.signals.transcriptAppend.emit(cleaned)
                         self.signals.transcriptReady.emit(cleaned)

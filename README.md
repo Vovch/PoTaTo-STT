@@ -3,7 +3,7 @@
 Minimal Windows desktop voice-to-text app: push-to-talk, optional file transcription, and subtitles.
 
 Core flow:
-- press and hold your **push-to-talk key(s)** (default: **Right Ctrl**; configure under **Options** — add several keys or mouse buttons, or capture any key/button by choosing **Add key…**)
+- press and hold your **push-to-talk key(s)** (default: **Right Ctrl**; configure under **Options** — add several keys or mouse buttons, or capture any key/button by choosing **Add key…**). Optional **filler word / phrase list** removes words like “um” from finished text (push-to-talk, file transcription, and subtitles). By default the list includes **`uh`** and **`um`** and the feature is **on** until you change it under **Options**.
 - capture microphone audio
 - transcribe (default: ONNX ASR / Parakeet TDT)
 - paste into the app that had focus when you **pressed** the key (also mirrored in this window)
