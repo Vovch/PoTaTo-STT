@@ -55,7 +55,7 @@ from potato_stt.audio_utils import float_to_int16_pcm, write_wav_from_int16_pcm
 from potato_stt.config import Settings
 from potato_stt.data_cleanup import clear_data_script_path
 from potato_stt.file_transcribe import transcribe_file_to_text_and_cues
-from potato_stt.media_decode import FFmpegNotFoundError
+from potato_stt.media_decode import FFMPEG_DOWNLOAD_URL, FFmpegNotFoundError
 from potato_stt.onnx_asr_engine import OnnxAsrEngine
 from potato_stt.parakeet_windows_installer import ensure_parakeet_service
 from potato_stt.stt_client import transcribe_wav
@@ -830,7 +830,22 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_ffmpeg_missing_notice(self, message: str) -> None:
-        QMessageBox.warning(self, "FFmpeg required", message)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("FFmpeg required")
+        box.setText(
+            "FFmpeg is not installed or not on PATH. "
+            "It is needed for most audio and video file formats."
+        )
+        box.setInformativeText(message)
+        open_btn = box.addButton(
+            "Open FFmpeg download page...",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if box.clickedButton() == open_btn:
+            QDesktopServices.openUrl(QUrl(FFMPEG_DOWNLOAD_URL))
 
     @Slot(str)
     def _on_error(self, msg: str) -> None:

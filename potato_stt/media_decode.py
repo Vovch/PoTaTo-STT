@@ -10,12 +10,19 @@ from pathlib import Path
 
 TARGET_SAMPLE_RATE = 16000
 
-# User-facing hint when FFmpeg/ffprobe are required but missing (file dialog + status line).
+# Official builds page (shown as a button in the UI when FFmpeg is missing).
+FFMPEG_DOWNLOAD_URL = "https://ffmpeg.org/download.html"
+
+# User-facing install proposal when FFmpeg/ffprobe are required but missing.
 FFMPEG_MISSING_USER_MESSAGE = (
-    "FFmpeg is not installed or not on PATH.\n\n"
-    "Install FFmpeg (it includes ffprobe) to transcribe MP3, MP4, and most other formats.\n\n"
-    "On Windows: winget install ffmpeg\n"
-    "Or: https://ffmpeg.org/download.html\n\n"
+    "Proposal: install FFmpeg (it includes ffprobe) so you can transcribe MP3, MP4, and most "
+    "other formats.\n\n"
+    "On Windows, open PowerShell or Command Prompt and run:\n\n"
+    "    winget install ffmpeg\n\n"
+    "When the installer finishes, close and reopen Potato STT (or sign out of Windows) so "
+    "your PATH includes ffmpeg and ffprobe.\n\n"
+    "If you prefer a manual install, use the download page button below and add the "
+    "extracted bin folder to your PATH.\n\n"
     "Without FFmpeg you can still use uncompressed 16 kHz mono PCM .wav files."
 )
 
