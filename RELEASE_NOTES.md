@@ -1,5 +1,31 @@
 # Release notes
 
+## Unreleased (planned **v1.4**)
+
+**Not released yet** — no git tag or published build for this line. When you ship, rename this section to `## Potato STT v1.4 — YYYY-MM-DD` and add the release commit hash.
+
+**Subject:** Filler-word cleanup, FFmpeg install guidance, media tests, pre-commit fix, `.gitignore` hygiene.
+
+### New behavior
+
+- **Filler words (Options):** Remove configured **whole words / phrases** (case-insensitive) from finished text after normalization. Applies to **push-to-talk**, **file transcription**, and **exported subtitles** (empty cues dropped). **Default for new installs:** filter **enabled** with **`uh`** and **`um`**; change or turn off under **Options**.
+- **FFmpeg missing:** If FFmpeg/ffprobe are required but not on `PATH`, the app raises a dedicated error, shows a **dialog** with an install **proposal** (including `winget install ffmpeg`), and an **Open FFmpeg download page…** button (`https://ffmpeg.org/download.html`).
+
+### Tests and repo layout
+
+- **Optional media regression tests** read samples from repo-root **`test_files/`** or **`test_file/`** (see `tests/helpers.py`: `user_test_media_paths()`). Extensions include **`.aiff` / `.aif`**. Committed samples: **`test_files/dear_shadows.*`** (multiple formats).
+- **New tests:** `tests/test_transcript_utils.py` (phrase parsing, word filter, subtitle cue filtering).
+
+### Tooling
+
+- **Git pre-commit:** Hook prefers **`.venv/Scripts/python.exe`** (Windows) or **`.venv/bin/python`** before `python3`/`python`, so commits are not blocked when the only `python` on `PATH` is the Microsoft Store alias. Reinstall with `.\.venv\Scripts\python.exe scripts\run_commit_tests.py --install-hook` (or `.\scripts\install_git_hooks.ps1`).
+
+### Housekeeping
+
+- **`.gitignore`:** `**/*.srt` and `**/*.vtt` for local subtitle exports; `.pytest_cache/`; common Python/tooling noise (`.coverage`, `htmlcov/`, `.mypy_cache/`, `.ruff_cache/`, `*.egg-info/`, etc.); OS/IDE junk (`.DS_Store`, `Thumbs.db`, `.idea/`). The old blanket ignore of `test_file/` was removed earlier so local or tracked test media can live beside **`test_files/`** as you prefer.
+
+---
+
 ## Potato STT v1.3 — 2026-03-28 (commit `8b77d78`)
 
 **Subject:** Rename to Potato STT; file transcription, tests, and UI polish.
@@ -25,7 +51,7 @@
 
 - **Unit tests:** `tests/run_tests.py` (stdlib **unittest** discovery), with `tests/test_media_decode.py`, `tests/test_subtitle_export.py`, `tests/test_file_transcribe.py`, and `tests/helpers.py`.
 - **`requirements-dev.txt`** and **`pytest.ini`** for optional pytest workflows.
-- **`.gitignore`:** local media test folder pattern (e.g. `test_file/`) ignored.
+- **`.gitignore`:** at the time of v1.3, optional local media under `test_file/` could be ignored (layout evolved in v1.4; see v1.4 notes).
 
 ### Packaging
 
@@ -64,4 +90,4 @@
 
 ---
 
-*Previous tags in this repo: `v1`, `v1.1`.*
+*Previous tags in this repo: `v1`, `v1.1`. **v1.3** is documented above with a date; **v1.4** is still **unreleased** until you tag and publish.*

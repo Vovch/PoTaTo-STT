@@ -2,6 +2,30 @@
 build/
 dist/
 __pycache__/
+.pytest_cache/
+
+# Test / type / lint tooling (if used)
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+
+# Packaging / install artifacts
+*.egg
+*.egg-info/
+.eggs/
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDEs (optional local; remove if you intentionally commit shared IDE config)
+.idea/
+
 *.pyc
 *.pyo
 *.pyd
@@ -13,4 +37,6 @@ __pycache__/
 *.pyzwzw
 *.pyzwzwz
 
+# Exported subtitles from local runs (same idea as *.srt)
 **/*.srt
+**/*.vtt
