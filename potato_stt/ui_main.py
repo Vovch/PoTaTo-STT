@@ -55,6 +55,7 @@ from potato_stt.audio_utils import float_to_int16_pcm, write_wav_from_int16_pcm
 from potato_stt.config import Settings
 from potato_stt.data_cleanup import clear_data_script_path
 from potato_stt.file_transcribe import transcribe_file_to_text_and_cues
+from potato_stt.media_decode import FFmpegNotFoundError
 from potato_stt.onnx_asr_engine import OnnxAsrEngine
 from potato_stt.parakeet_windows_installer import ensure_parakeet_service
 from potato_stt.stt_client import transcribe_wav
@@ -349,6 +350,7 @@ class AppSignals(QObject):
     transcriptAppend = Signal(str)
     transcriptReady = Signal(str)
     errorOccurred = Signal(str)
+    ffmpegMissing = Signal(str)
     recordingActive = Signal(bool)
     fileTranscribeDone = Signal(str, str, str, str)
 
@@ -495,6 +497,7 @@ class MainWindow(QMainWindow):
         self.signals.transcriptAppend.connect(self._append_transcript)
         self.signals.transcriptReady.connect(self._paste_transcript_to_active_app)
         self.signals.errorOccurred.connect(self._on_error)
+        self.signals.ffmpegMissing.connect(self._on_ffmpeg_missing_notice)
         self.signals.recordingActive.connect(self._on_recording_overlay)
         self.signals.fileTranscribeDone.connect(self._on_file_transcribe_done)
 
@@ -762,6 +765,14 @@ class MainWindow(QMainWindow):
                     f"File transcribed in {took:.1f}s. Transcript added (not pasted). Ready. Hold "
                     f"{specs_summary_phrase(ptt_specs_snapshot)} to talk."
                 )
+            except FFmpegNotFoundError as e:
+                self.signals.errorOccurred.emit(
+                    f"{type(e).__name__}: FFmpeg is not installed or not on PATH."
+                )
+                self.signals.ffmpegMissing.emit(str(e))
+                self.signals.statusChanged.emit(
+                    f"Ready. Hold {specs_summary_phrase(ptt_specs_snapshot)} to talk."
+                )
             except Exception as e:
                 self.signals.errorOccurred.emit(f"{type(e).__name__}: {e}")
                 self.signals.statusChanged.emit(
@@ -816,6 +827,10 @@ class MainWindow(QMainWindow):
             self._recording_overlay.show()
         else:
             self._recording_overlay.hide()
+
+    @Slot(str)
+    def _on_ffmpeg_missing_notice(self, message: str) -> None:
+        QMessageBox.warning(self, "FFmpeg required", message)
 
     @Slot(str)
     def _on_error(self, msg: str) -> None:

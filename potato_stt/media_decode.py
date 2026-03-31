@@ -10,6 +10,19 @@ from pathlib import Path
 
 TARGET_SAMPLE_RATE = 16000
 
+# User-facing hint when FFmpeg/ffprobe are required but missing (file dialog + status line).
+FFMPEG_MISSING_USER_MESSAGE = (
+    "FFmpeg is not installed or not on PATH.\n\n"
+    "Install FFmpeg (it includes ffprobe) to transcribe MP3, MP4, and most other formats.\n\n"
+    "On Windows: winget install ffmpeg\n"
+    "Or: https://ffmpeg.org/download.html\n\n"
+    "Without FFmpeg you can still use uncompressed 16 kHz mono PCM .wav files."
+)
+
+
+class FFmpegNotFoundError(RuntimeError):
+    """Raised when FFmpeg or ffprobe is required for the media path but not available."""
+
 
 def which_ffmpeg() -> Path | None:
     exe = shutil.which("ffmpeg")
@@ -72,10 +85,7 @@ def probe_media_duration_seconds(source: Path) -> float:
 
     ffprobe = which_ffprobe()
     if ffprobe is None:
-        raise RuntimeError(
-            "ffprobe is not on PATH (install FFmpeg; ffprobe is included). "
-            "It is needed to read duration for long files without decoding them fully."
-        )
+        raise FFmpegNotFoundError(FFMPEG_MISSING_USER_MESSAGE)
     cmd = [
         str(ffprobe),
         "-v",
@@ -177,10 +187,7 @@ def extract_chunk_wav_16k_mono(
 
     ffmpeg = which_ffmpeg()
     if ffmpeg is None:
-        raise RuntimeError(
-            "FFmpeg is not installed or not on PATH. "
-            "Install FFmpeg to extract segments from this format, or use a 16 kHz mono PCM WAV."
-        )
+        raise FFmpegNotFoundError(FFMPEG_MISSING_USER_MESSAGE)
 
     fd, tmp_name = tempfile.mkstemp(suffix=".wav", prefix=prefix)
     tmp = Path(tmp_name)
@@ -235,7 +242,7 @@ def decode_to_temp_wav_16k_mono(source: Path, *, prefix: str = "potato-stt-media
 
     Returns (path_to_temp_wav, duration_seconds).
 
-    Raises FileNotFoundError if source is missing; RuntimeError if FFmpeg is required
+    Raises FileNotFoundError if source is missing; FFmpegNotFoundError if FFmpeg is required
     but not installed (with install hint).
     """
     source = Path(source).resolve()
@@ -258,11 +265,7 @@ def decode_to_temp_wav_16k_mono(source: Path, *, prefix: str = "potato-stt-media
         ffmpeg = which_ffmpeg()
         if ffmpeg is None:
             tmp.unlink(missing_ok=True)
-            raise RuntimeError(
-                "FFmpeg is not installed or not on PATH. "
-                "Install FFmpeg to transcribe this file format (e.g. "
-                "`winget install ffmpeg` on Windows), or use a 16 kHz mono PCM WAV."
-            )
+            raise FFmpegNotFoundError(FFMPEG_MISSING_USER_MESSAGE)
 
         cmd = [
             str(ffmpeg),
