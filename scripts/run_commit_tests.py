@@ -26,10 +26,15 @@ def _venv_python(root: Path) -> Path | None:
     return p if p.is_file() else None
 
 
+# Prefer repo .venv so commits work on Windows without a global python3 (and avoid Store stubs).
 _HOOK_BODY = """#!/bin/sh
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT" || exit 1
-if command -v python3 >/dev/null 2>&1; then
+if [ -f "$ROOT/.venv/Scripts/python.exe" ]; then
+  PY="$ROOT/.venv/Scripts/python.exe"
+elif [ -f "$ROOT/.venv/bin/python" ]; then
+  PY="$ROOT/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
   PY=python3
 else
   PY=python

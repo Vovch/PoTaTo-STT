@@ -109,7 +109,7 @@ Set-Location <repo-root>
 .\scripts\install_git_hooks.ps1
 ```
 
-Or: `python scripts/run_commit_tests.py --install-hook` (any Python 3 with stdlib only). The hook is a small shell script that invokes `scripts/run_commit_tests.py`; uninstall by deleting `.git/hooks/pre-commit`. Each `git commit` runs `pytest tests -q --tb=short` via the venv.
+Or: `.\.venv\Scripts\python.exe scripts\run_commit_tests.py --install-hook` (use your venv Python on Windows if plain `python` is a Store alias). The hook prefers the repo `.venv` interpreter, then falls back to `python3`/`python`. Uninstall by deleting `.git/hooks/pre-commit`. Each `git commit` runs `pytest tests -q --tb=short` via the venv.
 
 Tests build small synthetic WAVs in a temp directory. Optional **local media** checks run when you add audio/video under **`test_file/`** (see `tests/helpers.py`); if the folder is empty or missing, those cases are skipped.
 
