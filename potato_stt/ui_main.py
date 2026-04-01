@@ -12,7 +12,7 @@ from typing import Optional
 
 import numpy as np
 import sounddevice as sd
-from PySide6.QtCore import QEvent, QObject, QRectF, QSettings, QSize, Qt, QUrl, Signal, Slot, QTimer
+from PySide6.QtCore import QEvent, QObject, QProcess, QRectF, QSettings, QSize, Qt, QUrl, Signal, Slot, QTimer
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -56,7 +56,14 @@ from potato_stt.audio_utils import float_to_int16_pcm, write_wav_from_int16_pcm
 from potato_stt.config import Settings
 from potato_stt.data_cleanup import clear_data_script_path
 from potato_stt.file_transcribe import transcribe_file_to_text_and_cues
-from potato_stt.media_decode import FFMPEG_DOWNLOAD_URL, FFmpegNotFoundError
+from potato_stt.media_decode import (
+    FFMPEG_DOWNLOAD_URL,
+    FFMPEG_MISSING_CONTEXT_AFTER_CLI,
+    FFMPEG_MISSING_CONTEXT_BEFORE_CLI,
+    FFMPEG_WINGET_INSTALL_ARGV,
+    FFMPEG_WINGET_INSTALL_CLI,
+    FFmpegNotFoundError,
+)
 from potato_stt.onnx_asr_engine import OnnxAsrEngine
 from potato_stt.parakeet_windows_installer import ensure_parakeet_service
 from potato_stt.stt_client import transcribe_wav
@@ -101,6 +108,18 @@ TRANSCRIPT_FILTER_WORDS = "ui/transcript_filter_words"
 # First-run defaults (used when keys are absent; existing QSettings win once saved).
 TRANSCRIPT_FILTER_ENABLED_DEFAULT = True
 TRANSCRIPT_FILTER_WORDS_DEFAULT = "uh\num"
+
+
+def _try_start_ffmpeg_winget_install() -> bool:
+    """Windows: open a new console running winget to install FFmpeg (adds ffmpeg/ffprobe to PATH).
+
+    Returns True if a detached process was started, False on non-Windows or launch failure.
+    """
+    if sys.platform != "win32":
+        return False
+    # `start "" …` — quoted empty title so `winget` is treated as the command, not the title.
+    args = ["/c", "start", "", "winget", *FFMPEG_WINGET_INSTALL_ARGV]
+    return QProcess.startDetached("cmd.exe", args)
 
 
 def build_app_icon() -> QIcon:
@@ -638,15 +657,24 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _quit_from_tray(self) -> None:
+        # Quit must run after the tray context menu returns on Windows; a synchronous
+        # QApplication.quit() from the menu action is often ignored and leaves the process running.
         self._shutdown()
-        QApplication.quit()
+        QTimer.singleShot(0, QApplication.quit)
 
     def _shutdown(self) -> None:
+        self._recording_overlay.hide()
+        if self._options_win is not None:
+            self._options_win.close()
         if self._tray_icon is not None:
             self._tray_icon.hide()
         self._stop_hotkey_listeners()
         try:
             self._stop_recording()
+        except Exception:
+            pass
+        try:
+            sd.stop()
         except Exception:
             pass
 
@@ -907,21 +935,118 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_ffmpeg_missing_notice(self, message: str) -> None:
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("FFmpeg required")
-        box.setText(
+        # message matches FFMPEG_MISSING_USER_MESSAGE; dialog mirrors it with a copy-friendly command.
+        _ = message
+        dlg = QDialog(self)
+        dlg.setWindowTitle("FFmpeg required")
+        dlg.setMinimumWidth(520)
+        style = dlg.style()
+        assert style is not None
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(
+            style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning).pixmap(48, 48)
+        )
+        summary = QLabel(
             "FFmpeg is not installed or not on PATH. "
             "It is needed for most audio and video file formats."
         )
-        box.setInformativeText(message)
-        open_btn = box.addButton(
-            "Open FFmpeg download page...",
-            QMessageBox.ButtonRole.ActionRole,
+        summary.setWordWrap(True)
+        f_sum = QFont(summary.font())
+        f_sum.setBold(True)
+        summary.setFont(f_sum)
+
+        before = QLabel(FFMPEG_MISSING_CONTEXT_BEFORE_CLI)
+        before.setWordWrap(True)
+
+        cmd_caption = QLabel("Command (select and copy):")
+        f_cap = QFont(cmd_caption.font())
+        f_cap.setBold(True)
+        cmd_caption.setFont(f_cap)
+
+        cmd_edit = QPlainTextEdit(FFMPEG_WINGET_INSTALL_CLI)
+        cmd_edit.setReadOnly(True)
+        cmd_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        cmd_edit.setTabChangesFocus(True)
+        cmd_font = QFont()
+        cmd_font.setStyleHint(QFont.StyleHint.Monospace)
+        cmd_font.setBold(True)
+        if cmd_font.pointSize() > 0:
+            cmd_font.setPointSize(cmd_font.pointSize() + 1)
+        cmd_edit.setFont(cmd_font)
+        lh = cmd_edit.fontMetrics().height()
+        cmd_edit.setFixedHeight(min(160, max(lh * 3, lh + 24)))
+        cmd_edit.setStyleSheet(
+            "QPlainTextEdit { background-color: palette(alternate-base); "
+            "border: 1px solid palette(mid); border-radius: 4px; padding: 6px; }"
         )
-        box.addButton(QMessageBox.StandardButton.Ok)
-        box.exec()
-        if box.clickedButton() == open_btn:
+
+        after = QLabel(FFMPEG_MISSING_CONTEXT_AFTER_CLI)
+        after.setWordWrap(True)
+
+        text_col = QVBoxLayout()
+        text_col.addWidget(summary)
+        text_col.addWidget(before)
+        text_col.addWidget(cmd_caption)
+        text_col.addWidget(cmd_edit)
+        text_col.addWidget(after)
+
+        top_row = QHBoxLayout()
+        top_row.addWidget(icon_lbl, 0, Qt.AlignmentFlag.AlignTop)
+        top_row.addLayout(text_col, 1)
+
+        bbox = QDialogButtonBox()
+        install_btn = None
+        if sys.platform == "win32":
+            install_btn = bbox.addButton(
+                "Install FFmpeg with winget…",
+                QDialogButtonBox.ButtonRole.ActionRole,
+            )
+        open_btn = bbox.addButton(
+            "Open FFmpeg download page...",
+            QDialogButtonBox.ButtonRole.ActionRole,
+        )
+        bbox.addButton(QDialogButtonBox.StandardButton.Ok)
+
+        root = QVBoxLayout(dlg)
+        root.addLayout(top_row)
+        root.addWidget(bbox)
+
+        # Avoid 0/1: QDialog.Rejected/Accepted would collide with our branches.
+        _DONE_INSTALL = 100
+        _DONE_OPEN = 101
+        _DONE_OK = 102
+
+        if install_btn is not None:
+            install_btn.clicked.connect(lambda: dlg.done(_DONE_INSTALL))
+        open_btn.clicked.connect(lambda: dlg.done(_DONE_OPEN))
+        ok_btn = bbox.button(QDialogButtonBox.StandardButton.Ok)
+        assert ok_btn is not None
+        ok_btn.clicked.connect(lambda: dlg.done(_DONE_OK))
+
+        def _focus_cmd() -> None:
+            cmd_edit.setFocus()
+            cmd_edit.selectAll()
+
+        QTimer.singleShot(0, _focus_cmd)
+
+        code = dlg.exec()
+        if code == _DONE_INSTALL and install_btn is not None:
+            if _try_start_ffmpeg_winget_install():
+                QMessageBox.information(
+                    self,
+                    "FFmpeg install",
+                    "A command window should open to install FFmpeg via winget.\n\n"
+                    "When it finishes successfully, restart Potato STT (or sign out of Windows) "
+                    "so ffmpeg and ffprobe are picked up from PATH.",
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "FFmpeg install",
+                    "Could not start winget. Install FFmpeg manually from the download page, "
+                    f"or run in a terminal:\n\n{FFMPEG_WINGET_INSTALL_CLI}",
+                )
+        elif code == _DONE_OPEN:
             QDesktopServices.openUrl(QUrl(FFMPEG_DOWNLOAD_URL))
 
     @Slot(str)

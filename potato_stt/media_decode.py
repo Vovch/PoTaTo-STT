@@ -13,17 +13,37 @@ TARGET_SAMPLE_RATE = 16000
 # Official builds page (shown as a button in the UI when FFmpeg is missing).
 FFMPEG_DOWNLOAD_URL = "https://ffmpeg.org/download.html"
 
-# User-facing install proposal when FFmpeg/ffprobe are required but missing.
-FFMPEG_MISSING_USER_MESSAGE = (
+# winget argv after the `winget` executable (UI copy + Windows install button use the same flags).
+FFMPEG_WINGET_INSTALL_ARGV = [
+    "install",
+    "-e",
+    "--id",
+    "Gyan.FFmpeg",
+    "--accept-package-agreements",
+    "--accept-source-agreements",
+]
+FFMPEG_WINGET_INSTALL_CLI = "winget " + " ".join(FFMPEG_WINGET_INSTALL_ARGV)
+
+# Body text shown around the command in the FFmpeg-required dialog (exception message matches).
+FFMPEG_MISSING_CONTEXT_BEFORE_CLI = (
     "Proposal: install FFmpeg (it includes ffprobe) so you can transcribe MP3, MP4, and most "
     "other formats.\n\n"
-    "On Windows, open PowerShell or Command Prompt and run:\n\n"
-    "    winget install ffmpeg\n\n"
+    "On Windows, open PowerShell or Command Prompt and run:"
+)
+FFMPEG_MISSING_CONTEXT_AFTER_CLI = (
     "When the installer finishes, close and reopen Potato STT (or sign out of Windows) so "
     "your PATH includes ffmpeg and ffprobe.\n\n"
     "If you prefer a manual install, use the download page button below and add the "
     "extracted bin folder to your PATH.\n\n"
     "Without FFmpeg you can still use uncompressed 16 kHz mono PCM .wav files."
+)
+
+FFMPEG_MISSING_USER_MESSAGE = (
+    FFMPEG_MISSING_CONTEXT_BEFORE_CLI
+    + "\n\n    "
+    + FFMPEG_WINGET_INSTALL_CLI
+    + "\n\n"
+    + FFMPEG_MISSING_CONTEXT_AFTER_CLI
 )
 
 
