@@ -1,15 +1,19 @@
 # Release notes
 
-## Unreleased (planned **v1.4**)
+## Potato STT v1.4 — 2026-04-01 (commit `b83bdfe`)
 
-**Not released yet** — no git tag or published build for this line. When you ship, rename this section to `## Potato STT v1.4 — YYYY-MM-DD` and add the release commit hash.
+**Subject:** Filler-word cleanup, FFmpeg install guidance (winget), reliable tray quit on Windows, media tests, pre-commit fix, `.gitignore` hygiene.
 
-**Subject:** Filler-word cleanup, FFmpeg install guidance, media tests, pre-commit fix, `.gitignore` hygiene.
+Application changes for this release are in commit **`b83bdfe`**; release notes were committed separately so the documented hash stays stable.
+
+### Reliability (Windows)
+
+- **Quit from system tray:** **Quit** in the tray menu now exits the process reliably. `QApplication.quit()` is scheduled for the **next event-loop tick** so it runs after the native context menu closes (a synchronous quit from that menu was often ignored, leaving Potato STT running after the tray icon disappeared). Shutdown also hides the **recording** overlay, closes **Options** if it is open, and calls **`sounddevice.stop()`** so PortAudio capture does not keep the interpreter alive.
 
 ### New behavior
 
 - **Filler words (Options):** Remove configured **whole words / phrases** (case-insensitive) from finished text after normalization. Applies to **push-to-talk**, **file transcription**, and **exported subtitles** (empty cues dropped). **Default for new installs:** filter **enabled** with **`uh`** and **`um`**; change or turn off under **Options**.
-- **FFmpeg missing:** If FFmpeg/ffprobe are required but not on `PATH`, the app raises a dedicated error, shows a **dialog** with an install **proposal** (including `winget install ffmpeg`), and an **Open FFmpeg download page…** button (`https://ffmpeg.org/download.html`).
+- **FFmpeg missing:** If FFmpeg/ffprobe are required but not on `PATH`, the app raises a dedicated error and shows a **dialog** with copy-friendly text. The suggested Windows command uses **`winget install -e --id Gyan.FFmpeg --accept-package-agreements --accept-source-agreements`** (same argv as the **Install FFmpeg (winget)** button). An **Open FFmpeg download page…** button links to `https://ffmpeg.org/download.html`.
 
 ### Tests and repo layout
 
@@ -90,4 +94,4 @@
 
 ---
 
-*Previous tags in this repo: `v1`, `v1.1`. **v1.3** is documented above with a date; **v1.4** is still **unreleased** until you tag and publish.*
+*Previous tags in this repo: `v1`, `v1.1`. **v1.3** and **v1.4** are documented above with dates; tag **`v1.4`** when you publish the build.*
