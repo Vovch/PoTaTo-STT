@@ -112,3 +112,22 @@ class Settings:
         )
         == 1
     )
+
+    # Gemma 3 270M int8 (CTranslate2) translation — see potato_stt.gemma_translate.
+    translate_ct2_repo: str = _env_str(
+        "POTATO_STT_TRANSLATE_CT2_REPO",
+        None,
+        default="jncraton/gemma-3-270m-it-ct2-int8",
+    )
+    # cpu | cuda | auto (auto prefers CUDA when CTranslate2 reports a GPU).
+    translate_device: str = _env_str(
+        "POTATO_STT_TRANSLATE_DEVICE",
+        None,
+        default="cpu",
+    )
+    # int8_float32: int8 weights with float32 activations (default). int8: full int8 (greedier).
+    translate_compute_type: str = _env_str(
+        "POTATO_STT_TRANSLATE_COMPUTE_TYPE",
+        None,
+        default="int8_float32",
+    )

@@ -28,6 +28,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -54,6 +55,7 @@ from pynput import keyboard, mouse
 
 from potato_stt.audio_utils import float_to_int16_pcm, write_wav_from_int16_pcm
 from potato_stt.config import Settings
+from potato_stt.gemma_translate import TARGET_LANGUAGES, language_display_for_code, translate_cue_texts, translate_text
 from potato_stt.data_cleanup import clear_data_script_path
 from potato_stt.file_transcribe import transcribe_file_to_text_and_cues
 from potato_stt.media_decode import (
@@ -108,6 +110,10 @@ TRANSCRIPT_FILTER_WORDS = "ui/transcript_filter_words"
 # First-run defaults (used when keys are absent; existing QSettings win once saved).
 TRANSCRIPT_FILTER_ENABLED_DEFAULT = True
 TRANSCRIPT_FILTER_WORDS_DEFAULT = "uh\num"
+TRANSLATION_ENABLED = "ui/translation_enabled"
+TRANSLATION_TARGET_LANG = "ui/translation_target_lang"
+TRANSLATION_ENABLED_DEFAULT = False
+TRANSLATION_TARGET_LANG_DEFAULT = "es"
 
 
 def _try_start_ffmpeg_winget_install() -> bool:
@@ -339,6 +345,52 @@ class OptionsWindow(QWidget):
         _filter_help.setStyleSheet("color: #888888; font-size: 11px;")
         layout.addWidget(_filter_help)
 
+        self._translation_cb = QCheckBox("Translate transcripts and subtitles (Gemma 3 270M, int8)")
+        self._translation_cb.setChecked(
+            bool(
+                self._settings.value(
+                    TRANSLATION_ENABLED,
+                    TRANSLATION_ENABLED_DEFAULT,
+                    type=bool,
+                )
+            )
+        )
+        self._translation_cb.setToolTip(
+            "After speech recognition, translate text with a local Gemma 3 270M model "
+            "(CTranslate2 int8 weights). First use downloads the model from Hugging Face."
+        )
+        self._translation_cb.toggled.connect(self._on_translation_enabled_toggled)
+        layout.addWidget(self._translation_cb)
+
+        _lang_row = QHBoxLayout()
+        _lang_row.addWidget(QLabel("Translate speech to:"))
+        self._translation_lang = QComboBox()
+        for code, label in TARGET_LANGUAGES:
+            self._translation_lang.addItem(label, code)
+        saved_lang = str(
+            self._settings.value(TRANSLATION_TARGET_LANG, TRANSLATION_TARGET_LANG_DEFAULT) or ""
+        ).strip()
+        idx = self._translation_lang.findData(saved_lang)
+        if idx < 0:
+            idx = self._translation_lang.findData(TRANSLATION_TARGET_LANG_DEFAULT)
+        if idx < 0:
+            idx = 0
+        self._translation_lang.setCurrentIndex(idx)
+        self._translation_lang.currentIndexChanged.connect(self._on_translation_lang_changed)
+        _lang_row.addWidget(self._translation_lang, 1)
+        layout.addLayout(_lang_row)
+
+        _trans_help = QLabel(
+            "Uses jncraton/gemma-3-270m-it-ct2-int8 (int8 weights). "
+            "Optional: POTATO_STT_TRANSLATE_DEVICE=cuda or auto; "
+            "POTATO_STT_TRANSLATE_COMPUTE_TYPE=int8_float32 (default) or int8."
+        )
+        _trans_help.setWordWrap(True)
+        _trans_help.setStyleSheet("color: #888888; font-size: 11px;")
+        layout.addWidget(_trans_help)
+
+        self._translation_lang.setEnabled(self._translation_cb.isChecked())
+
         layout.addStretch(1)
         self._populate_ptt_list()
 
@@ -418,6 +470,36 @@ class OptionsWindow(QWidget):
     @Slot()
     def _on_transcript_filter_words_changed(self) -> None:
         self._settings.setValue(TRANSCRIPT_FILTER_WORDS, self._filter_words.toPlainText())
+
+    @Slot(bool)
+    def _on_translation_enabled_toggled(self, checked: bool) -> None:
+        if checked:
+            missing = []
+            for mod in ("ctranslate2", "transformers", "sentencepiece"):
+                try:
+                    __import__(mod)
+                except ImportError:
+                    missing.append(mod)
+            if missing:
+                QMessageBox.warning(
+                    self,
+                    "Translation",
+                    f"Missing packages: {', '.join(missing)}\n\n"
+                    "Install with:\n"
+                    "pip install ctranslate2 transformers sentencepiece jinja2 huggingface_hub",
+                )
+                self._translation_cb.blockSignals(True)
+                self._translation_cb.setChecked(False)
+                self._translation_cb.blockSignals(False)
+                return
+        self._settings.setValue(TRANSLATION_ENABLED, bool(checked))
+        self._translation_lang.setEnabled(bool(checked))
+
+    @Slot()
+    def _on_translation_lang_changed(self) -> None:
+        code = self._translation_lang.currentData()
+        if isinstance(code, str) and code:
+            self._settings.setValue(TRANSLATION_TARGET_LANG, code)
 
 
 class AppSignals(QObject):
@@ -792,6 +874,21 @@ class MainWindow(QMainWindow):
         phrases = parse_filter_phrases(raw)
         return phrases if phrases else None
 
+    def _translation_target_code(self) -> Optional[str]:
+        """BCP-style language code from Options, or None when translation is off."""
+        if not bool(
+            self._qsettings.value(
+                TRANSLATION_ENABLED,
+                TRANSLATION_ENABLED_DEFAULT,
+                type=bool,
+            )
+        ):
+            return None
+        raw = str(
+            self._qsettings.value(TRANSLATION_TARGET_LANG, TRANSLATION_TARGET_LANG_DEFAULT) or ""
+        ).strip().lower()
+        return raw or TRANSLATION_TARGET_LANG_DEFAULT
+
     @Slot(str)
     def _append_transcript(self, text: str) -> None:
         current = self._transcript.toPlainText().strip()
@@ -837,6 +934,8 @@ class MainWindow(QMainWindow):
         src_str = str(source_path.resolve())
         ptt_specs_snapshot = list(self._ptt_specs)
         filter_phrases = self._effective_filter_phrases()
+        settings_snapshot = self.settings
+        translate_code = self._translation_target_code()
 
         def job() -> None:
             try:
@@ -849,27 +948,69 @@ class MainWindow(QMainWindow):
 
                 cleaned, cues = transcribe_file_to_text_and_cues(
                     source_path,
-                    chunk_seconds=self.settings.transcribe_chunk_seconds,
-                    stt_backend=self.settings.stt_backend,
+                    chunk_seconds=settings_snapshot.transcribe_chunk_seconds,
+                    stt_backend=settings_snapshot.stt_backend,
                     onnx_engine=self._onnx_engine,
-                    stt_api_url=self.settings.stt_api_url,
-                    stt_model=self.settings.stt_model,
-                    stt_response_format=self.settings.stt_response_format,
-                    stt_timeout_seconds=self.settings.stt_timeout_seconds,
+                    stt_api_url=settings_snapshot.stt_api_url,
+                    stt_model=settings_snapshot.stt_model,
+                    stt_response_format=settings_snapshot.stt_response_format,
+                    stt_timeout_seconds=settings_snapshot.stt_timeout_seconds,
                     on_progress=_progress,
                 )
                 fp = filter_phrases
                 if fp:
                     cleaned = apply_word_filter_after_normalize(cleaned, fp)
                     cues = filter_subtitle_cues(list(cues), fp)
+                translate_fell_back = False
+                if translate_code is not None and (cleaned.strip() or cues):
+                    lang_label = language_display_for_code(translate_code)
+
+                    def _t_status(msg: str) -> None:
+                        self.signals.statusChanged.emit(
+                            f"Transcribing file: {source_path.name} — {msg}"
+                        )
+
+                    try:
+                        if cleaned.strip():
+                            original = cleaned
+                            cleaned = translate_text(
+                                cleaned,
+                                target_language=lang_label,
+                                settings=settings_snapshot,
+                                on_status=_t_status,
+                            )
+                            if cleaned.strip() == original.strip():
+                                translate_fell_back = True
+                        if cues:
+                            texts = [c[2] for c in cues]
+                            trans = translate_cue_texts(
+                                texts,
+                                target_language=lang_label,
+                                settings=settings_snapshot,
+                                on_status=_t_status,
+                            )
+                            cues = [(s, e, nt) for (s, e, _), nt in zip(cues, trans)]
+                    except Exception as e:
+                        self.signals.errorOccurred.emit(
+                            f"Translation failed: {type(e).__name__}: {e}"
+                        )
                 took = time.time() - t0
                 srt_body = cues_to_srt(cues) if cues else ""
                 vtt_body = cues_to_vtt(cues) if cues else ""
                 self.signals.fileTranscribeDone.emit(src_str, cleaned, srt_body, vtt_body)
-                self.signals.statusChanged.emit(
-                    f"File transcribed in {took:.1f}s. Transcript added (not pasted). Ready. Hold "
+                status = f"File transcribed in {took:.1f}s."
+                if translate_fell_back:
+                    status += (
+                        f" Translation to"
+                        f" {language_display_for_code(translate_code)}"
+                        " had no effect — model may not support"
+                        " this language pair."
+                    )
+                status += (
+                    " Transcript added (not pasted). Ready. Hold "
                     f"{specs_summary_phrase(ptt_specs_snapshot)} to talk."
                 )
+                self.signals.statusChanged.emit(status)
             except FFmpegNotFoundError as e:
                 self.signals.errorOccurred.emit(
                     f"{type(e).__name__}: FFmpeg is not installed or not on PATH."
@@ -1123,6 +1264,9 @@ class MainWindow(QMainWindow):
         elif "transcribing" in lower:
             self._progress.setRange(0, 0)
             self._progress.setFormat("Transcribing...")
+        elif "translat" in lower:
+            self._progress.setRange(0, 0)
+            self._progress.setFormat("Translating...")
         else:
             self._progress.setRange(0, 0)
             self._progress.setFormat("Working...")
@@ -1342,6 +1486,7 @@ class MainWindow(QMainWindow):
         self._transcribing = True
         self.signals.statusChanged.emit("Transcribing...")
         filter_phrases = self._effective_filter_phrases()
+        translate_code = self._translation_target_code()
 
         def _job(pcm_data: np.ndarray) -> None:
             try:
@@ -1364,13 +1509,40 @@ class MainWindow(QMainWindow):
                         )
                     took = time.time() - t0
                     cleaned = postprocess_transcript_text(text, filter_phrases=filter_phrases)
+                    translate_fell_back = False
+                    if translate_code is not None and cleaned.strip():
+                        lang_label = language_display_for_code(translate_code)
+                        self.signals.statusChanged.emit("Translating...")
+                        original = cleaned
+                        try:
+                            cleaned = translate_text(
+                                cleaned,
+                                target_language=lang_label,
+                                settings=self.settings,
+                                on_status=lambda m: self.signals.statusChanged.emit(m),
+                            )
+                            if cleaned.strip() == original.strip():
+                                translate_fell_back = True
+                        except Exception as e:
+                            self.signals.errorOccurred.emit(
+                                f"Translation failed: {type(e).__name__}: {e}"
+                            )
                     if cleaned:
                         self.signals.transcriptAppend.emit(cleaned)
                         self.signals.transcriptReady.emit(cleaned)
-                    self.signals.statusChanged.emit(
-                        f"Transcribed in {took:.1f}s. Ready. Hold "
+                    status = f"Transcribed in {took:.1f}s."
+                    if translate_fell_back:
+                        status += (
+                            f" Translation to"
+                            f" {language_display_for_code(translate_code)}"
+                            " had no effect — model may not support"
+                            " this language pair."
+                        )
+                    status += (
+                        " Ready. Hold "
                         f"{specs_summary_phrase(self._ptt_specs)} to talk."
                     )
+                    self.signals.statusChanged.emit(status)
             except Exception as e:
                 self.signals.errorOccurred.emit(f"{type(e).__name__}: {e}")
             finally:

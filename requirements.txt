@@ -6,3 +6,9 @@ pynput
 py7zr
 onnx-asr[hub]
 onnxruntime-directml
+# Local translation (Gemma 3 270M int8 CTranslate2); see README / Options.
+ctranslate2>=4.3
+transformers>=4.48
+sentencepiece
+jinja2
+huggingface_hub

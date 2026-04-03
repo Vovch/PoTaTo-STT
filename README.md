@@ -25,6 +25,16 @@ Use **File → Transcribe media file…** (or the toolbar / tray) to pick an aud
 
 Each HTTP chunk uses the same timeout as push-to-talk (`POTATO_STT_TIMEOUT_SECONDS`). Tune segment length with `POTATO_STT_TRANSCRIBE_CHUNK_SECONDS` (seconds, clamped between 30 and 600 in code).
 
+## Translation (optional)
+
+Under **Options**, you can enable **Translate transcripts and subtitles** and choose a target language. After recognition, text is translated with a **local Gemma 3 270M** instruction model in **CTranslate2 int8** form ([`jncraton/gemma-3-270m-it-ct2-int8`](https://huggingface.co/jncraton/gemma-3-270m-it-ct2-int8) on Hugging Face). The first run downloads that model. Translation applies to **push-to-talk** (including pasted text), the **file transcript**, and **exported `.srt` / `.vtt` cues**.
+
+Environment variables (optional):
+
+- `POTATO_STT_TRANSLATE_CT2_REPO` — Hugging Face repo id for the CTranslate2 model (default: `jncraton/gemma-3-270m-it-ct2-int8`).
+- `POTATO_STT_TRANSLATE_DEVICE` — `cpu` (default), `cuda`, or `auto`.
+- `POTATO_STT_TRANSLATE_COMPUTE_TYPE` — `int8_float32` (default, int8 weights + float32 activations) or `int8` for full int8 compute.
+
 ## How STT runs (Parakeet TDT on Windows)
 
 This app auto-downloads a community “Parakeet Windows all-in-one package” (a `.7z`), runs `启动.bat`, and uses its local OpenAI-compatible API.

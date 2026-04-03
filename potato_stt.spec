@@ -29,6 +29,7 @@ hiddenimports = [
     "potato_stt.stt_client",
     "potato_stt.media_decode",
     "potato_stt.file_transcribe",
+    "potato_stt.gemma_translate",
     "potato_stt.subtitle_export",
     "potato_stt.win32_paste",
     "sounddevice",
@@ -43,6 +44,11 @@ hiddenimports = [
 
 try:
     binaries += collect_dynamic_libs("onnxruntime")
+except Exception:
+    pass
+
+try:
+    binaries += collect_dynamic_libs("ctranslate2")
 except Exception:
     pass
 
