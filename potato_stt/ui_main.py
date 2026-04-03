@@ -12,7 +12,20 @@ from typing import Optional
 
 import numpy as np
 import sounddevice as sd
-from PySide6.QtCore import QEvent, QObject, QProcess, QRectF, QSettings, QSize, Qt, QUrl, Signal, Slot, QTimer
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QProcess,
+    QRectF,
+    QSettings,
+    QSharedMemory,
+    QSize,
+    Qt,
+    QUrl,
+    Signal,
+    Slot,
+    QTimer,
+)
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -1379,6 +1392,23 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_job, args=(pcm,), daemon=True).start()
 
 
+# Held for the process lifetime so the single-instance shared segment stays mapped.
+_single_instance_memory: QSharedMemory | None = None
+
+
+def _acquire_single_instance() -> bool:
+    """Return True if this process should run; False if another instance is already active."""
+    global _single_instance_memory
+    mem = QSharedMemory("PotatoSTT_SingleInstance")
+    if mem.attach():
+        mem.detach()
+        return False
+    if not mem.create(1):
+        return False
+    _single_instance_memory = mem
+    return True
+
+
 def _normalize_application_font(app: QApplication) -> None:
     """Windows high-DPI defaults sometimes leave QFont.pointSize() at -1; Qt then warns if
     something calls setPointSize with that value. Force a positive point size.
@@ -1399,6 +1429,13 @@ def main() -> None:
         set_windows_app_user_model_id()
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     app = QApplication([])
+    if not _acquire_single_instance():
+        QMessageBox.warning(
+            None,
+            "Potato STT",
+            "Another instance of Potato STT is already running.",
+        )
+        raise SystemExit(0)
     _normalize_application_font(app)
     app_icon = build_app_icon()
     app.setWindowIcon(app_icon)
