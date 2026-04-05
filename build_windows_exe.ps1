@@ -18,6 +18,8 @@ if (-not (Test-Path $VenvPython)) {
 Write-Host "Installing dependencies into .venv ..." -ForegroundColor Cyan
 & $VenvPython -m pip install --upgrade pip
 & $VenvPython -m pip install -r "$Root\requirements.txt" -r "$Root\requirements-build.txt"
+# CPU-only PyTorch for bundled local RU→EN translation (Marian).
+& $VenvPython -m pip install torch --index-url "https://download.pytorch.org/whl/cpu"
 
 Write-Host "Running PyInstaller ..." -ForegroundColor Cyan
 & $VenvPython -m PyInstaller "$Root\potato_stt.spec" --clean --noconfirm

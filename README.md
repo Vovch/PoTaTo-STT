@@ -6,6 +6,7 @@ Core flow:
 - press and hold your **push-to-talk key(s)** (default: **Right Ctrl**; configure under **Options** — add several keys or mouse buttons, or capture any key/button by choosing **Add key…**). Optional **filler word / phrase list** removes words like “um” from finished text (push-to-talk, file transcription, and subtitles). By default the list includes **`uh`** and **`um`** and the feature is **on** until you change it under **Options**.
 - capture microphone audio
 - transcribe (default: ONNX ASR / Parakeet TDT)
+- optional **local Russian → English translation** after push-to-talk: enable **Translate push-to-talk transcripts to English** under **Options** (or **Ctrl+,**). A **warning** offers **Agree** or **Refuse** (Refuse is default); **Agree** turns the feature on and starts downloading the **Marian model (~300 MB)** from Hugging Face in the background **if it is not already** in your local Hugging Face cache (internet required). The model is **not** bundled in the EXE. **PyTorch** and **transformers** are included in the **regular Windows EXE build** (`build_windows_exe.ps1`) so users do not install them by hand. The transcript list shows the recognized text and, when translation is on, an **English:** line with the translation when it differs from that recognition; **paste** is English only after the Marian model has downloaded and loaded successfully. When running from source without torch, the app can offer **pip** to install dependencies.
 - paste into the app that had focus when you **pressed** the key (also mirrored in this window)
 
 **Paste troubleshooting:** If text only appears here, click the target text field first, then use push-to-talk. Windows may block focus steal for elevated (Run as administrator) apps unless Potato STT is also elevated.
@@ -42,7 +43,12 @@ From the project folder:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
+
+`requirements.txt` includes **transformers**, **sentencepiece**, and **sacremoses** for translation; **torch** is installed separately so you get the CPU wheel from PyTorch’s index (same as `build_windows_exe.ps1`). Optional **`requirements-translate.txt`** only helps if you want to reinstall translation packages alone.
+
+The Windows **PyInstaller** build (`build_windows_exe.ps1`) installs **`requirements.txt`**, **`requirements-build.txt`**, and **CPU PyTorch**, so the shipped **`dist\PotatoSTT`** folder includes translation libraries (the Marian weights still download when the user agrees in the app).
 
 **Development (tests + pre-commit hook):** from the project folder, run once per clone:
 
@@ -68,7 +74,8 @@ Environment variables (optional). Names use the **`POTATO_STT_`** prefix; the ap
 - `POTATO_STT_PARAKEET_INSTALL_DIR` (default: under `%LOCALAPPDATA%\potato_stt\`) — legacy: `PIPIT_PARKEET_INSTALL_DIR`
 - `POTATO_STT_PARAKEET_LAUNCH_TIMEOUT_SECONDS` (default: `1800`) — legacy: `PIPIT_PARKEET_LAUNCH_TIMEOUT_SECONDS`
 - `POTATO_STT_PARAKEET_AUTO_DOWNLOAD` (default: `1`) — legacy: `PIPIT_PARKEET_AUTO_DOWNLOAD`
-- `POTATO_STT_PARAKEET_SOURCE_FALLBACK` (default: `1`) — legacy: `PIPIT_PARKEET_SOURCE_FALLBACK`
+- `POTATO_STT_PARAKEET_SOURCE_FALLBACK` (default: `1`) — legacy: `PIPIT_PARAKEET_SOURCE_FALLBACK`
+- `POTATO_STT_MARIAN_RU_EN_MODEL` (default: `Helsinki-NLP/opus-mt-ru-en`) — Hugging Face model id for local **Russian → English** translation when enabled under **Options**
 
 Example:
 

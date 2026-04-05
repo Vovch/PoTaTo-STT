@@ -74,7 +74,7 @@ pip install -r requirements-dev.txt
 .\scripts\install_git_hooks.ps1
 ```
 
-Optional extras: `requirements-build.txt` (see `build_windows_exe.ps1`).
+Optional extras: `requirements-build.txt` (see `build_windows_exe.ps1`). Translation deps are in `requirements.txt`; `build_windows_exe.ps1` also installs CPU PyTorch so the frozen bundle includes them. `requirements-translate.txt` is only for reinstalling translation wheels alone.
 
 ## Run
 

@@ -118,9 +118,24 @@ from potato_stt.win32_startup import (
 START_MINIMIZED_SETTING = "ui/start_minimized"
 TRANSCRIPT_FILTER_ENABLED = "ui/transcript_filter_enabled"
 TRANSCRIPT_FILTER_WORDS = "ui/transcript_filter_words"
+TRANSLATE_RU_EN_ENABLED = "ui/translate_ru_en_enabled"
+TRANSLATION_MODEL_FETCH_APPROVED = "ui/translation_model_fetch_approved"
 # First-run defaults (used when keys are absent; existing QSettings win once saved).
 TRANSCRIPT_FILTER_ENABLED_DEFAULT = True
 TRANSCRIPT_FILTER_WORDS_DEFAULT = "uh\num"
+TRANSLATE_RU_EN_ENABLED_DEFAULT = False
+TRANSLATION_MODEL_FETCH_APPROVED_DEFAULT = False
+
+
+def _translation_marian_module():
+    """Lazy import of the Marian translation module (keeps optional startup cost low)."""
+    import importlib
+
+    return importlib.import_module("potato_stt.marian_ru_en")
+
+
+def _tr_runtime_ready() -> bool:
+    return _translation_marian_module().is_translation_runtime_ready()
 
 
 def _try_start_ffmpeg_winget_install() -> bool:
@@ -352,6 +367,27 @@ class OptionsWindow(QWidget):
         _filter_help.setStyleSheet("color: #888888; font-size: 11px;")
         layout.addWidget(_filter_help)
 
+        self._translate_ru_en_cb = QCheckBox(
+            "Translate push-to-talk transcripts to English (Russian → English, local model)"
+        )
+        self._translate_ru_en_cb.setChecked(
+            bool(
+                self._settings.value(
+                    TRANSLATE_RU_EN_ENABLED,
+                    TRANSLATE_RU_EN_ENABLED_DEFAULT,
+                    type=bool,
+                )
+            )
+        )
+        self._translate_ru_en_cb.setToolTip(
+            "After each utterance, paste English into the target app. This window shows the recognition "
+            "and an English line when the translation differs. After you agree in the notice dialog, "
+            "the Marian model (~300 MB) downloads from Hugging Face in the background if it is not "
+            "already on this PC. Uses PyTorch on the CPU."
+        )
+        self._translate_ru_en_cb.toggled.connect(self._on_translate_ru_en_toggled)
+        layout.addWidget(self._translate_ru_en_cb)
+
         layout.addStretch(1)
         self._populate_ptt_list()
 
@@ -406,6 +442,18 @@ class OptionsWindow(QWidget):
     def sync_ptt_from_settings(self) -> None:
         self._populate_ptt_list()
 
+    def sync_translate_from_settings(self) -> None:
+        v = bool(
+            self._settings.value(
+                TRANSLATE_RU_EN_ENABLED,
+                TRANSLATE_RU_EN_ENABLED_DEFAULT,
+                type=bool,
+            )
+        )
+        self._translate_ru_en_cb.blockSignals(True)
+        self._translate_ru_en_cb.setChecked(v)
+        self._translate_ru_en_cb.blockSignals(False)
+
     @Slot(bool)
     def _on_startup_toggled(self, checked: bool) -> None:
         try:
@@ -432,6 +480,31 @@ class OptionsWindow(QWidget):
     def _on_transcript_filter_words_changed(self) -> None:
         self._settings.setValue(TRANSCRIPT_FILTER_WORDS, self._filter_words.toPlainText())
 
+    def _revert_translate_ru_en_checkbox(self) -> None:
+        self._translate_ru_en_cb.blockSignals(True)
+        self._translate_ru_en_cb.setChecked(False)
+        self._translate_ru_en_cb.blockSignals(False)
+
+    @Slot(bool)
+    def _on_translate_ru_en_toggled(self, checked: bool) -> None:
+        if not checked:
+            self._settings.setValue(TRANSLATE_RU_EN_ENABLED, False)
+            self._settings.setValue(TRANSLATION_MODEL_FETCH_APPROVED, False)
+            return
+
+        main = self._main
+        show_warn = getattr(main, "_show_local_translation_consent_warning", None)
+        continue_flow = getattr(main, "_continue_local_translation_enable_after_consent", None)
+        if show_warn is None or continue_flow is None:
+            self._revert_translate_ru_en_checkbox()
+            return
+        if not show_warn():
+            self._revert_translate_ru_en_checkbox()
+            return
+        if not continue_flow():
+            self._revert_translate_ru_en_checkbox()
+            return
+
 
 class AppSignals(QObject):
     statusChanged = Signal(str)
@@ -441,6 +514,7 @@ class AppSignals(QObject):
     ffmpegMissing = Signal(str)
     recordingActive = Signal(bool)
     fileTranscribeDone = Signal(str, str, str, str)
+    translationModelPreloadFinished = Signal(bool, str)
 
 
 class RecordingOverlay(QWidget):
@@ -581,13 +655,18 @@ class MainWindow(QMainWindow):
         _toolbar.addAction(act_tb_options)
 
         self.signals = AppSignals()
-        self.signals.statusChanged.connect(self._on_status_update)
-        self.signals.transcriptAppend.connect(self._append_transcript)
-        self.signals.transcriptReady.connect(self._paste_transcript_to_active_app)
-        self.signals.errorOccurred.connect(self._on_error)
-        self.signals.ffmpegMissing.connect(self._on_ffmpeg_missing_notice)
-        self.signals.recordingActive.connect(self._on_recording_overlay)
-        self.signals.fileTranscribeDone.connect(self._on_file_transcribe_done)
+        # Queued so slots always run on the GUI thread when workers emit (avoids blocking/freezes).
+        qc = Qt.ConnectionType.QueuedConnection
+        self.signals.statusChanged.connect(self._on_status_update, qc)
+        self.signals.transcriptAppend.connect(self._append_transcript, qc)
+        self.signals.transcriptReady.connect(self._paste_transcript_to_active_app, qc)
+        self.signals.errorOccurred.connect(self._on_error, qc)
+        self.signals.ffmpegMissing.connect(self._on_ffmpeg_missing_notice, qc)
+        self.signals.recordingActive.connect(self._on_recording_overlay, qc)
+        self.signals.fileTranscribeDone.connect(self._on_file_transcribe_done, qc)
+        self.signals.translationModelPreloadFinished.connect(
+            self._on_translation_model_preload_finished, qc
+        )
 
         self._recording_overlay = RecordingOverlay()
         self._recording_overlay.hide()
@@ -733,9 +812,130 @@ class MainWindow(QMainWindow):
         if self._options_win is None:
             self._options_win = OptionsWindow(self)
         self._options_win.sync_ptt_from_settings()
+        self._options_win.sync_translate_from_settings()
         self._options_win.show()
         self._options_win.raise_()
         self._options_win.activateWindow()
+
+    def _show_local_translation_consent_warning(self) -> bool:
+        """Warning dialog with explicit Agree / Refuse (default Refuse). Returns True if user agrees."""
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("Local translation — notice")
+        msg.setText(
+            "Local Russian → English translation will:\n"
+            "• Paste English into the app that had focus; this window lists the recognized text and "
+            "the English wording (when it differs).\n"
+            "• After you choose **Agree**, the Marian model (~300 MB from the internet) downloads in the "
+            "background if it is not already on this PC (saved in your Hugging Face cache). "
+            "Watch the main window status line for progress.\n"
+            "• Run on your PC using PyTorch on the CPU.\n\n"
+            "Choose **Agree** to enable translation and start the download when needed, or **Refuse** to cancel."
+        )
+        refuse_btn = msg.addButton("Refuse", QMessageBox.ButtonRole.RejectRole)
+        agree_btn = msg.addButton("Agree", QMessageBox.ButtonRole.AcceptRole)
+        msg.setDefaultButton(refuse_btn)
+        msg.exec()
+        return msg.clickedButton() == agree_btn
+
+    def _continue_local_translation_enable_after_consent(self) -> bool:
+        """After Agree on the warning: install deps if needed, finish enable. Returns False if user cancels or setup fails."""
+        if _tr_runtime_ready():
+            self._finish_enabling_local_translation()
+            return True
+
+        if getattr(sys, "frozen", False):
+            QMessageBox.warning(
+                self,
+                "Translation unavailable",
+                "PyTorch or transformers could not be loaded from this installation. "
+                "Try reinstalling Potato STT or run from source with `pip install -r requirements.txt` "
+                "and a CPU PyTorch wheel.",
+            )
+            return False
+
+        pip_ask = QMessageBox(self)
+        pip_ask.setIcon(QMessageBox.Icon.Question)
+        pip_ask.setWindowTitle("Install translation packages?")
+        pip_ask.setText(
+            "PyTorch (CPU) and related packages are not installed in this Python environment.\n\n"
+            "Install them now with pip? This needs internet access and may download several hundred MB "
+            f"into the environment used by:\n{sys.executable}"
+        )
+        pip_ask.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        pip_ask.setDefaultButton(QMessageBox.StandardButton.No)
+        if pip_ask.exec() != QMessageBox.StandardButton.Yes:
+            return False
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            code, log = _translation_marian_module().install_translation_runtime_packages()
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        if code != 0 or not _tr_runtime_ready():
+            fail = QMessageBox(self)
+            fail.setIcon(QMessageBox.Icon.Warning)
+            fail.setWindowTitle("Installation failed")
+            fail.setText(
+                "pip could not install the translation stack, or imports still fail after install. "
+                "See details below."
+            )
+            fail.setDetailedText(log[:12000] if log else "(no log)")
+            fail.exec()
+            return False
+
+        self._finish_enabling_local_translation()
+        return True
+
+    def _finish_enabling_local_translation(self) -> None:
+        self._qsettings.setValue(TRANSLATE_RU_EN_ENABLED, True)
+        self._sync_options_translate_checkbox()
+        self._start_translation_model_preload()
+
+    def _sync_options_translate_checkbox(self) -> None:
+        if self._options_win is not None:
+            self._options_win.sync_translate_from_settings()
+
+    def _start_translation_model_preload(self) -> None:
+        """Background Hugging Face download + Marian load; finishes on the GUI thread via signal."""
+        # Consent to fetch weights — must be True before load finishes so transcription can translate
+        # while this download runs (second load path serializes on the Marian module lock).
+        self._qsettings.setValue(TRANSLATION_MODEL_FETCH_APPROVED, True)
+
+        def run() -> None:
+            ok = True
+            err = ""
+            try:
+                m = _translation_marian_module()
+
+                def on_status(s: str) -> None:
+                    self.signals.statusChanged.emit(s)
+
+                m.preload_translation_model(on_status=on_status)
+            except Exception as e:
+                ok = False
+                err = f"{type(e).__name__}: {e}"
+            self.signals.translationModelPreloadFinished.emit(ok, err)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    @Slot(bool, str)
+    def _on_translation_model_preload_finished(self, ok: bool, err: str) -> None:
+        if ok:
+            self.signals.statusChanged.emit(
+                f"Translation model ready. Hold {specs_summary_phrase(self._ptt_specs)} to talk."
+            )
+            return
+        QMessageBox.warning(
+            self,
+            "Translation model",
+            f"The translation model could not be downloaded or loaded:\n{err}\n\n"
+            "Local translation stays enabled. In **Options**, turn the translation checkbox off and on "
+            "again to retry the download, or speak again — the next run will retry loading the model.",
+        )
 
     @Slot()
     def _on_clear_local_data(self) -> None:
@@ -1127,6 +1327,10 @@ class MainWindow(QMainWindow):
             self._progress.setRange(0, 0)
             self._progress.setFormat("Preparing ONNX model...")
             return
+        if "marian" in lower and "hugging face" in lower:
+            self._progress.setRange(0, 0)
+            self._progress.setFormat("Downloading translation model...")
+            return
         # PTT completion uses "Ready."; file transcription used to omit it and hit the
         # generic "Working..." branch (indeterminate bar looks like endless loading).
         if "ready." in lower or "file transcribed" in lower:
@@ -1355,6 +1559,20 @@ class MainWindow(QMainWindow):
         self._transcribing = True
         self.signals.statusChanged.emit("Transcribing...")
         filter_phrases = self._effective_filter_phrases()
+        translate_ru_en_enabled = bool(
+            self._qsettings.value(
+                TRANSLATE_RU_EN_ENABLED,
+                TRANSLATE_RU_EN_ENABLED_DEFAULT,
+                type=bool,
+            )
+        )
+        translation_fetch_ok = bool(
+            self._qsettings.value(
+                TRANSLATION_MODEL_FETCH_APPROVED,
+                TRANSLATION_MODEL_FETCH_APPROVED_DEFAULT,
+                type=bool,
+            )
+        )
 
         def _job(pcm_data: np.ndarray) -> None:
             try:
@@ -1379,7 +1597,24 @@ class MainWindow(QMainWindow):
                     cleaned = postprocess_transcript_text(text, filter_phrases=filter_phrases)
                     if cleaned:
                         self.signals.transcriptAppend.emit(cleaned)
-                        self.signals.transcriptReady.emit(cleaned)
+                        to_paste = cleaned
+                        if translate_ru_en_enabled:
+                            self.signals.statusChanged.emit("Translating to English…")
+
+                            def _tr_status(msg: str) -> None:
+                                self.signals.statusChanged.emit(msg)
+
+                            tr = _translation_marian_module().translate_ru_en
+                            to_paste = tr(
+                                cleaned,
+                                on_status=_tr_status,
+                                model_fetch_allowed=translation_fetch_ok,
+                            )
+                            if to_paste.strip() != cleaned.strip():
+                                self.signals.transcriptAppend.emit(
+                                    f"{to_paste.strip()}"
+                                )
+                        self.signals.transcriptReady.emit(to_paste)
                     self.signals.statusChanged.emit(
                         f"Transcribed in {took:.1f}s. Ready. Hold "
                         f"{specs_summary_phrase(self._ptt_specs)} to talk."

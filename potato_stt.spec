@@ -7,6 +7,8 @@ Build from the repository root (prefer the project venv — see build_windows_ex
 
 Output: dist/PotatoSTT/PotatoSTT.exe (one-folder bundle; recommended for ONNX/Qt/DirectML).
 
+The default build installs CPU PyTorch + transformers (see build_windows_exe.ps1) so local RU→EN translation works in the frozen app (Marian weights still download from Hugging Face when the user agrees).
+
 Do not use collect_all(PySide6): it pulls every Qt module (3D, QML, …) and makes the build huge.
 """
 import os
@@ -22,6 +24,7 @@ binaries: list = []
 hiddenimports = [
     "potato_stt",
     "potato_stt.ui_main",
+    "potato_stt.marian_ru_en",
     "potato_stt.audio_utils",
     "potato_stt.config",
     "potato_stt.onnx_asr_engine",
@@ -39,10 +42,18 @@ hiddenimports = [
     "onnx_asr",
     "onnxruntime",
     "py7zr",
+    "transformers.models.marian.modeling_marian",
+    "transformers.models.marian.configuration_marian",
+    "transformers.models.marian.tokenization_marian",
 ]
 
 try:
     binaries += collect_dynamic_libs("onnxruntime")
+except Exception:
+    pass
+
+try:
+    binaries += collect_dynamic_libs("torch")
 except Exception:
     pass
 

@@ -6,3 +6,8 @@ pynput
 py7zr
 onnx-asr[hub]
 onnxruntime-directml
+# Local RU→EN translation (Marian + PyTorch). CPU torch wheel is installed by build_windows_exe.ps1;
+# for a dev venv: pip install torch --index-url https://download.pytorch.org/whl/cpu
+transformers>=4.36.0,<5
+sentencepiece>=0.1.99
+sacremoses>=0.0.53

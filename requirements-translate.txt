@@ -1,0 +1,9 @@
+# Translation stack is included in requirements.txt and in the default Windows EXE build.
+# Use this file only if you want to (re)install translation deps without touching the rest:
+#
+#   pip install -r requirements-translate.txt
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+transformers>=4.36.0,<5
+sentencepiece>=0.1.99
+sacremoses>=0.0.53
