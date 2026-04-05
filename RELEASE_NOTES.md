@@ -1,5 +1,29 @@
 # Release notes
 
+## Potato STT v1.5 — 2026-04-05 (commit `a26e74a`)
+
+**Subject:** Optional **local Russian → English** translation after push-to-talk (Marian / PyTorch CPU), streamlined **Options-only** enablement, main-window **English** line, packaging and reliability fixes for model download.
+
+### New behavior
+
+- **Local translation (RU → EN):** After each push-to-talk utterance, optionally **paste English** into the app that had focus when recording started. The main transcript still shows the **recognized** text and, when translation is on and the wording **differs**, an **`English:`** line is appended for that utterance. Uses **Helsinki-NLP OPUS-MT** (`opus-mt-ru-en`) via **`transformers`** and **CPU PyTorch**; override the model id with **`POTATO_STT_MARIAN_RU_EN_MODEL`** if needed.
+- **Enable under Options:** Check **Translate push-to-talk transcripts to English**. A single **notice** dialog (**Agree** / **Refuse**, Refuse default) explains behavior, **~300 MB** download from **Hugging Face** when the model is **not already** in the user’s HF cache, and CPU use. **Agree** turns the feature on and **starts background download/load** immediately (no second confirmation, no separate **Settings** menu item for translation).
+- **From source without torch:** The app can offer **pip** to install the translation stack into the current interpreter (frozen EXE builds bundle the stack via **`build_windows_exe.ps1`** / **`requirements.txt`**).
+
+### Reliability and UX
+
+- **Fetch consent timing:** Permission to download Marian weights is recorded **when the background preload starts**, so translation does not fail with “model not loaded” while the first download is still running or after a transient error; failed preload no longer forces translation off—retry via **Options** (toggle off/on) or the next utterance.
+- **Worker → UI:** **`AppSignals`** slots use **queued connections** so status, errors, transcript lines, and preload completion always run on the **GUI thread** (reduces apparent freezes during download/load).
+- **Marian load:** **`TOKENIZERS_PARALLELISM`**, bounded **PyTorch** thread counts during load, and **cleanup of partial tokenizer/model state** on load failure for cleaner retries.
+
+### Packaging and repo
+
+- **`potato_stt/marian_ru_en.py`**, **`requirements-translate.txt`** (optional reinstall of translation wheels), **`requirements.txt`** / **`potato_stt.spec`** / **`build_windows_exe.ps1`** updates for frozen bundles.
+- **Tests:** **`tests/test_marian_ru_en.py`** (helpers, no full model download in CI).
+- **Docs:** **`README.md`** and **`AGENTS.md`** aligned with the new flow.
+
+---
+
 ## Potato STT v1.4 — 2026-04-01 (commit `b83bdfe`)
 
 **Subject:** Filler-word cleanup, FFmpeg install guidance (winget), reliable tray quit on Windows, media tests, pre-commit fix, `.gitignore` hygiene.
@@ -94,4 +118,4 @@ Application changes for this release are in commit **`b83bdfe`**; release notes 
 
 ---
 
-*Previous tags in this repo: `v1`, `v1.1`. **v1.3** and **v1.4** are documented above with dates; tag **`v1.4`** when you publish the build.*
+*Previous tags in this repo: `v1`, `v1.1`. **v1.3**, **v1.4**, and **v1.5** are documented above with dates; tag **`v1.5`** when you publish this build.*
